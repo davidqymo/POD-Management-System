@@ -11,10 +11,18 @@
 **Phase 1 (Requirements Refinement):** ✅ **COMPLETE**
 **Phase 1.5 (UX Design Deliverables):** ✅ **COMPLETE**
 **Phase 2 (Implementation Planning):** ✅ **COMPLETE**
-**Phase 2.5 (TDD Remediation):** ✅ **COMPLETE** — 15 fixes applied to `doc/TECHNICAL_DESIGN.md` (duplicate removal, section renumbering, FK renames, schema corrections)
+**Phase 2.5 (TDD Remediation):** ✅ **COMPLETE** — v2.1 → v2.2 critical block fixes (5 P0 + 5 P2), then v2.2 → v2.3 SFS alignment fixes (2 blocking notification events + 3 P1 service/error matrix)
 **Phase 3 (Implementation Execution):** 🎯 **READY TO START** — implementation plan at `docs/superpowers/plans/2026-04-19-pod-team-management-phase1.md`
 
-All major decisions documented in `doc/PRODUCT_REQUIREMENTS.md` (v1.5). PRD updated to capture UX decisions from review (Q1–Q5). Technical Design Document (`doc/TECHNICAL_DESIGN.md`) v2.1 remediated and validated. Design now passes dependency checks and is implementation-ready.
+**TDD Version History:**
+| Version | Date       | Changes Summary |
+| ------- | ---------- | --------------- |
+| v2.0    | 2026-04-17 | Initial draft from consolidation |
+| v2.1    | 2026-04-18 | TDD v2.0 validated: 15 dependency fixes (duplicate sections, FK renames, schema corrections, four-eyes removal) |
+| v2.2    | 2026-04-19 | P0 critical blockers resolved: added 3 missing MVs (utilization, overplan, cash-flow), expanded notifications 4→9 events, added `is_billable` to resources/rates schema, added `ResourceService.changeStatus()` + `ProjectService.transitionToTerminal()` concrete signatures, added Resource export LATERAL join SQL, added error code appendix with 13 codes, added Notification Center UI spec (19.5–19.6), added audit partition automation task |
+| v2.3    | 2026-04-19 | SFS v1.0 full alignment: added 2 blocking notification events (`RATE_CHANGED`, `RESOURCE_STATUS_CHANGED`), unified `AUTOALLOCATION_COMPLETE` event naming, added Project Reactivation service method (`reactivateCancelledProject()`) and endpoint, expanded Error Code Matrix with 4 additional codes (`CYCLE_DETECTED`, `VALIDATION_ERROR`, `DUPLICATE_KEY`, `NOT_FOUND`, `UNAUTHORIZED`), added consolidated RBAC Role Definitions table |
+
+All major decisions documented in `doc/PRODUCT_REQUIREMENTS.md` (v1.5). PRD updated to capture UX decisions from review (Q1–Q5). Technical Design Document (`doc/TECHNICAL_DESIGN.md`) v2.3 fully aligned with System Functional Specification (`SPEC_FUNCTIONAL.md` v1.0). Design passes dependency checks and is **implementation-ready**.
 
 ---
 
