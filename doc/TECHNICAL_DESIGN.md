@@ -2,7 +2,7 @@
 
 **PRD Version:** 1.5
 **Functional Spec Reference:** SPEC_FUNCTIONAL.md (SFS v1.0)
-**Design Version:** 2.1
+**Design Version:** 2.2
 **Date:** 2026-04-19
 **Status:** Draft — Implementation Ready
 **Audience:** Backend Engineers, DevOps, QA, Frontend Engineers
@@ -75,11 +75,11 @@ This **Technical Design Document (TDD)** translates the System Functional Specif
 └───────────────────────┬─────────────────────────────────────┘
                         │ HTTPS/REST + WS
 ┌───────────────────────▼─────────────────────────────────────┐
-│                 API Layer (FastAPI)                          │
-│  — @app.get/post/put/delete routers                         │
-│  — Pydantic DTO validation                                  │
-│  — Depends() injection (Auth, DB)                            │
-│  — GlobalExceptionHandler → JSON error envelope            │
+│                 API Layer (Spring Boot MVC)                  │
+│  — @RestController @RequestMapping/@GetMapping              │
+│  — Jakarta Validation (JSR-380) DTO validation              │
+│  — Spring Security + JWT filter chain                        │
+│  — @ControllerAdvice → JSON error envelope                  │
 └───────────────────────┬─────────────────────────────────────┘
                         │
 ┌───────────────────────▼─────────────────────────────────────┐
@@ -87,14 +87,14 @@ This **Technical Design Document (TDD)** translates the System Functional Specif
 │  ResourceService | ProjectService | AllocationService      │
 │  RateService     | ApprovalService | DashboardService      │
 │  AutoAllocationService | NotificationService                │
-│  — @transactional decorator                                 │
-│  — Domain events (Pub/Sub)                                  │
+│  — @Transactional                                            │
+│  — Domain events (ApplicationEventPublisher)               │
 └───────────────────────┬─────────────────────────────────────┘
                         │
 ┌───────────────────────▼─────────────────────────────────────┐
-│           Data Access Layer (SQLAlchemy 2.0 + Async)         │
-│  AsyncSession, Repository pattern, optimistic locking       │
-│  — select()/insert()/update() async ORM                     │
+│           Data Access Layer (Spring Data JPA + Hibernate)    │
+│  JpaRepository, @Query (JPQL), optimistic locking @Version  │
+│  — EntityManager CRUD operations                             │
 └───────────────────────┬─────────────────────────────────────┘
                         │
 ┌───────────────────────▼─────────────────────────────────────┐
@@ -114,16 +114,17 @@ This **Technical Design Document (TDD)** translates the System Functional Specif
 
 | Layer                | Technology                   | Version | Rationale                                    |
 | -------------------- | ---------------------------- | ------- | -------------------------------------------- |
-| **Language**   | Python                       | 3.11    | Async/await for concurrent allocation engine |
-| **Framework**  | FastAPI                      | 0.110+  | Auto-generated OpenAPI, Pydantic, async      |
-| **ORM**        | SQLAlchemy                   | 2.0+    | Async ORM with Alembic migrations            |
+| **Language**   | Java                        | 17+    | LTS, virtual threads (Project Loom), strong typing |
+| **Framework**  | Spring Boot                 | 3.2.x  | Auto-configuration, Spring MVC, Spring Data JPA, Spring Security |
+| **ORM**        | Hibernate (via Spring Data JPA) | 6.x  | JPA 3.1, pessimistic/optimistic locking, Criteria API |
 | **Database**   | PostgreSQL                   | 15+     | JSONB, partitioning, materialized views      |
-| **Migrations** | Alembic                      | 1.13+   | Versioned SQL migrations                     |
-| **Cache**      | Redis                        | 7.x     | Sub-ms rate lookups, pub/sub                 |
-| **Auth**       | JWT (PyJWT)                  | 2.8+    | Stateless token authentication               |
-| **Async**      | asyncio + APScheduler        | —      | Background jobs (MV refresh)                 |
-| **Testing**    | pytest, Testcontainers       | —      | Integration tests for Postgres+Redis         |
+| **Migrations** | Flyway                       | 10.x+   | Versioned SQL migrations                     |
+| **Cache**      | Spring Data Redis + Lettuce  | —      | Sub-ms rate lookups, pub/sub                 |
+| **Auth**       | Spring Security + JWT (jjwt)| —      | Stateless token authentication               |
+| **Scheduler**  | Spring @Scheduled           | —      | Background jobs (MV refresh)                 |
+| **Testing**    | JUnit 5 + Testcontainers + Mockito | — | Integration tests for Postgres+Redis         |
 | **Frontend**   | React 18 + TypeScript + Vite | —      | Modern reactive UI                           |
+| **Build**      | Maven                       | 3.9+   | Dependency management, build lifecycle       |
 
 ---
 
@@ -148,11 +149,18 @@ CREATE TABLE resources (
     hire_date DATE,
     end_date DATE,
     status VARCHAR(20) NOT NULL DEFAULT 'active',
+    is_billable BOOLEAN NOT NULL DEFAULT TRUE,
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
     version INTEGER NOT NULL DEFAULT 1,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+**Column Semantics:**
+- `is_billable`: Whether this resource can be assigned to billable project work. `FALSE` = internal/bench resource, excluded from allocation eligibility and dashboard billable HCM calculations. Default `TRUE`.
+- `is_active`: Soft-delete flag. `FALSE` = resource retired/terminated/archived; excluded from all queries unless explicitly requested. Default `TRUE`.
+
+**Billable Filter:** Resource list endpoints and allocation creation implicitly filter `WHERE is_billable = TRUE AND is_active = TRUE`. Non-billable resources are viewable in Admin management list only.
 
 #### `users`
 
@@ -181,6 +189,7 @@ CREATE TABLE rates (
     monthly_rate_K NUMERIC(10,2) NOT NULL,  -- in K USD (e.g., 14.40 = $14,400/month)
     effective_from CHAR(6) NOT NULL,
     effective_to CHAR(6) NOT NULL,
+    is_billable BOOLEAN NOT NULL DEFAULT TRUE,
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
@@ -188,6 +197,12 @@ CREATE TABLE rates (
     CONSTRAINT chk_effective_dates CHECK (effective_to >= effective_from)
 );
 ```
+
+**Column Semantics:**
+- `is_billable`: Whether this rate applies to billable project work. `FALSE` = internal/non-billable rate (used for bench or non-customer-facing teams), excluded from cost calculations. Default `TRUE`.
+- `is_active`: Soft-delete flag. `FALSE` = rate superseded/retired; preserved for historical allocation audit trail. Default `TRUE`.
+
+Rate queries for allocation cost lookup implicitly filter `WHERE is_billable = TRUE AND is_active = TRUE AND effective_from <= :yyyyMM AND effective_to >= :yyyyMM`.
 
 **Period Contiguity & Auto-Closing Algorithm:**
 
@@ -198,57 +213,52 @@ When inserting a new rate for `(cost_center_id, billable_team_code)`:
 3. Insert the new rate with `effective_to = NULL` (will be closed when next rate arrives)
 4. Old rates are preserved (`is_active = FALSE`) for historical calculations
 
-**Python Implementation:**
+**Java Service Implementation (Spring Data JPA + Transactional):**
 
-```python
-# backend/app/services/rate_service.py
-class RateService:
-    async def create_rate(self, payload: RateCreateCommand) -> Rate:
-        """
-        Creates a new rate, automatically closing the previous active rate.
-        Ensures periods are contiguous with no gaps or overlaps.
-        """
-        async with db.session() as s:
-            # Find current active rate for this (CC, BTC) - lock it
-            current = await s.execute(
-                text("""
-                    SELECT id, effective_from
-                    FROM rates
-                    WHERE cost_center_id = :cc
-                      AND billable_team_code = :btc
-                      AND effective_to IS NULL
-                      AND is_active = TRUE
-                    FOR UPDATE SKIP LOCKED
-                """),
-                {"cc": payload.cost_center_id, "btc": payload.billable_team_code}
-            ).fetchone()
+```java
+// backend/src/main/java/com/pod/service/RateService.java
+@Service
+@Slf4j
+@RequiredArgsConstructor
+public class RateService {
 
-            if current:
-                # Close current rate: effective_to = NEW.effective_from - 1 month
-                new_effective_to = (
-                    datetime.strptime(payload.effective_from, '%Y%m')
-                    - relativedelta(months=1)
-                ).strftime('%Y%m')
-                await s.execute(
-                    text("UPDATE rates SET effective_to = :to WHERE id = :id"),
-                    {"to": new_effective_to, "id": current.id}
-                )
+    private final RateRepository rateRepository;
+    private final EntityManager entityManager;
 
-            # Insert new rate with NULL effective_to (open-ended)
-            new_rate = Rate(
-                cost_center_id=payload.cost_center_id,
-                billable_team_code=payload.billable_team_code,
-                monthly_rate_K=payload.monthly_rate_K,
-                effective_from=payload.effective_from,
-                effective_to=None,
-                is_active=True
-            )
-            s.add(new_rate)
-            await s.commit()
-            return new_rate
+    @Transactional
+    public Rate createRate(CreateRateRequest request) {
+        // Find current active rate for this (CC, BTC) with PESSIMISTIC_WRITE lock
+        List<Rate> activeRates = rateRepository.findActiveByCostCenterAndTeam(
+            request.getCostCenterId(),
+            request.getBillableTeamCode(),
+            LockModeType.PESSIMISTIC_WRITE
+        );
+
+        if (!activeRates.isEmpty()) {
+            Rate current = activeRates.get(0);
+            // Close current rate: effectiveTo = NEW.effectiveFrom minus 1 month
+            YearMonth newEffectiveFrom = YearMonth.parse(request.getEffectiveFrom());
+            YearMonth newEffectiveTo = newEffectiveFrom.minusMonths(1);
+            current.setEffectiveTo(newEffectiveTo);
+            rateRepository.save(current);
+        }
+
+        // Insert new rate with NULL effectiveTo (open-ended)
+        Rate newRate = Rate.builder()
+            .costCenterId(request.getCostCenterId())
+            .billableTeamCode(request.getBillableTeamCode())
+            .monthlyRateK(request.getMonthlyRateK())
+            .effectiveFrom(YearMonth.parse(request.getEffectiveFrom()))
+            .effectiveTo(null)
+            .isActive(true)
+            .build();
+
+        return rateRepository.save(newRate);
+    }
+}
 ```
 
-**Concurrency Handling:** The `SELECT ... FOR UPDATE SKIP LOCKED` ensures only one transaction can modify the current active rate at a time. If another admin tries simultaneously, they'll wait for the lock, then see the updated state (with `effective_to` set) and proceed correctly.
+**Concurrency Handling:** `LockModeType.PESSIMISTIC_WRITE` obtains a row-level lock on the active rate. Concurrent requests block at the SELECT, ensuring only one transaction modifies the active rate at a time. After the first transaction commits and sets `effectiveTo`, subsequent transactions see no active rate and insert the new rate correctly.
 
 **Validation Rules:**
 
@@ -358,7 +368,7 @@ CREATE TABLE allocations (
     hours NUMERIC(5,2) NOT NULL,  -- hours per week within the week_start_date range
     status VARCHAR(20) NOT NULL DEFAULT 'pending',
     version INTEGER NOT NULL DEFAULT 1,
-    approved_by_user_id BIGINT REFERENCES users(id),
+    approved_by BIGINT REFERENCES users(id),
     approved_at TIMESTAMPTZ,
     rejection_reason VARCHAR(500),
     notes TEXT,
@@ -368,7 +378,7 @@ CREATE TABLE allocations (
 
     CONSTRAINT uq_active_allocation UNIQUE (resource_id, project_id, week_start_date)
         WHERE is_active = TRUE AND status IN ('pending','approved'),
-    -- Four-eyes rule enforced at service layer via approved_by_user_id.user.resource_id check
+    CONSTRAINT chk_four_eyes CHECK (approved_by IS NULL OR approved_by != resource_id)
 );
 ```
 
@@ -447,6 +457,65 @@ CREATE TABLE notifications (
 | `PATCH` | `/resources/{id}/status` | Admin | Change status (requires reason; Admin-only per PRD 2.1)            |
 | `POST`  | `/resources/import/csv`  | Admin | Upload CSV → preview → confirm                                   |
 
+#### 5.2.1 `/export/resources` Query Implementation
+
+Backend controller: `ExportController.getResourceCsv()` delegates to `ResourceExportService.exportResourcesAsCsv()`. The query fetches active resources with their **latest effective rate** joined via LATERAL subquery to avoid rate-period joins in the main FROM clause.
+
+**SQL implementation (Java Spring `JdbcTemplate` query):**
+
+```sql
+-- ResourceExportService.java — exported as CSV stream (no pagination limit)
+SELECT
+    r.id,
+    r.external_id,
+    r.name,
+    r.cost_center_id,
+    r.billable_team_code,
+    r.category,
+    r.skill,
+    r.level,
+    r.hire_date,
+    r.end_date,
+    r.status,
+    r.is_billable,
+    COALESCE(latest_rate.monthly_rate_K, 0) as latest_monthly_rate_K,
+    COALESCE(latest_rate.effective_from, '') as rate_effective_from
+FROM resources r
+LEFT JOIN LATERAL (
+    SELECT rate.monthly_rate_K, rate.effective_from
+    FROM rates rate
+    WHERE rate.cost_center_id = r.cost_center_id
+      AND rate.billable_team_code = r.billable_team_code
+      AND rate.is_active = TRUE
+      AND rate.is_billable = TRUE
+      AND rate.effective_from <= TO_CHAR(CURRENT_DATE, 'YYYYMM')
+      AND rate.effective_to >= TO_CHAR(CURRENT_DATE, 'YYYYMM')
+    ORDER BY rate.effective_from DESC
+    LIMIT 1
+) latest_rate ON TRUE
+WHERE r.is_active = TRUE
+ORDER BY r.cost_center_id, r.billable_team_code, r.name;
+```
+
+**CSV column mapping:**
+
+| CSV Column           | Source Field                     | Notes                                       |
+| -------------------- | -------------------------------- | ------------------------------------------- |
+| `id`                 | `r.id`                          | Internal PK — omitted from public export   |
+| `external_id`        | `r.external_id`                 | Employee number / staff ID                 |
+| `name`               | `r.name`                        | Full name                                   |
+| `cost_center_id`     | `r.cost_center_id`              | Cost center code                            |
+| `billable_team_code` | `r.billable_team_code`          | Team code                                   |
+| `category`           | `r.category`                    | `contractor` / `permanent`                  |
+| `skill`              | `r.skill`                       | e.g., `backend`, `frontend`, `qa`           |
+| `level`              | `r.level`                       | 1–10                                        |
+| `status`             | `r.status`                      | `active`, `on-leave`, `terminated`          |
+| `is_billable`        | `r.is_billable`                 | `true` / `false`                            |
+| `monthly_rate_K`     | `latest_rate.monthly_rate_K`    | `0` if no matching active rate (data gap!) |
+| `rate_effective_from`| `latest_rate.effective_from`    | YYYYMM string; blank if no rate found       |
+
+**Rate Gap Detection:** If `latest_rate.monthly_rate_K IS NULL` for any billable resource (`is_billable = TRUE`), the service logs an error with code `RATE_GAP_DETECTED` and includes that resource in the `"warnings"` section of the CSV download (separate sheet or footer — client-side decision).
+
 ### 5.3 Project & Activity APIs
 
 | Method    | Endpoint                      | Purpose                                        |
@@ -475,6 +544,98 @@ CREATE TABLE notifications (
 | `GET` | `/dashboard/supply-demand` | Monthly bar chart: capacity vs allocated HCM |
 | `GET` | `/dashboard/burn-rate`     | Trend: budget remaining over time            |
 | `GET` | `/dashboard/variance`      | Project-level planned vs actual variance     |
+
+### 5.6 Rate APIs
+
+| Method  | Endpoint                      | Purpose                                 |
+| ------- | ----------------------------- | --------------------------------------- |
+| `GET`  | `/rates`                    | List all rates (filterable by CC, BTC)  |
+| `GET`  | `/rates/{id}`               | Detail single rate                      |
+| `POST` | `/rates`                    | Create new rate (Admin; handles auto-close of previous active) |
+| `PATCH`| `/rates/{id}`               | Update rate (Admin only; no effective date change allowed on closed rates) |
+| `DELETE`| `/rates/{id}`              | Soft delete (is_active = false); history retained |
+| `GET`  | `/rates/history/{cc}/{btc}` | Full rate history for cost center/team  |
+
+**Validation:** New rate `effectiveFrom` must be exactly +1 month after current active rate's `effectiveFrom`. Overlap prohibited. Contiguous month sequence enforced.
+
+### 5.7 Holiday APIs
+
+| Method  | Endpoint                 | Purpose                                     |
+| ------- | ------------------------ | ------------------------------------------- |
+| `GET`  | `/holidays`            | List all holidays (optionally by cost_center) |
+| `POST` | `/holidays`            | Create single holiday (Admin)               |
+| `POST` | `/holidays/batch`      | Bulk import from CSV (Admin)               |
+| `PATCH`| `/holidays/{id}`       | Update date/description (Admin)             |
+| `DELETE`| `/holidays/{id}`      | Soft delete (Admin)                         |
+
+**Business Rule:** Global holidays (cost_center_id = null) apply to all resources; CC-specific holidays override/union with global.
+
+### 5.8 Export APIs
+
+| Method  | Endpoint                              | Purpose                                           |
+| ------- | ------------------------------------- | ------------------------------------------------- |
+| `GET`  | `/export/resources`                 | Export resources + latest active rates as CSV     |
+| `GET`  | `/export/allocations`               | Export allocations for given filters as CSV       |
+| `GET`  | `/export/audit-log`                 | Export audit records with filters (Admin only)    |
+| `GET`  | `/export/projects/{id}/gantt`       | Export Gantt chart data as JSON or PDF            |
+
+**Filename format:** `{entity}_export_YYYY-MM-DD_HHMM.csv`. Max rows per export: 100,000.
+
+### 5.9 Report APIs
+
+| Method  | Endpoint                        | Purpose                                         |
+| ------- | ------------------------------- | ------------------------------------------------ |
+| `GET`  | `/reports/project-budget`     | Budget vs actual spend per project (tabular)     |
+| `GET`  | `/reports/utilization`        | Resource utilization heatmap by skill/cost center |
+| `GET`  | `/reports/rate-variance`      | Historical rate change analysis across resources |
+
+All report endpoints support date range filters and CSV export.
+
+### 5.6 Rate APIs
+
+| Method  | Endpoint                      | Purpose                                 |
+| ------- | ----------------------------- | --------------------------------------- |
+| `GET`  | `/rates`                    | List all rates (filterable by CC, BTC)  |
+| `GET`  | `/rates/{id}`               | Detail single rate                      |
+| `POST` | `/rates`                    | Create new rate (Admin; handles auto-close of previous active) |
+| `PATCH`| `/rates/{id}`               | Update rate (Admin only; no effective date change allowed on closed rates) |
+| `DELETE`| `/rates/{id}`              | Soft delete (is_active = false); history retained |
+| `GET`  | `/rates/history/{cc}/{btc}` | Full rate history for cost center/team  |
+
+**Validation:** New rate `effectiveFrom` must be exactly +1 month after current active rate's `effectiveFrom`. Overlap prohibited. Contiguous month sequence enforced.
+
+### 5.7 Holiday APIs
+
+| Method  | Endpoint                 | Purpose                                     |
+| ------- | ------------------------ | ------------------------------------------- |
+| `GET`  | `/holidays`            | List all holidays (optionally by cost_center) |
+| `POST` | `/holidays`            | Create single holiday (Admin)               |
+| `POST` | `/holidays/batch`      | Bulk import from CSV (Admin)               |
+| `PATCH`| `/holidays/{id}`       | Update date/description (Admin)             |
+| `DELETE`| `/holidays/{id}`      | Soft delete (Admin)                         |
+
+**Business Rule:** Global holidays (cost_center_id = null) apply to all resources; CC-specific holidays override/union with global.
+
+### 5.8 Export APIs
+
+| Method  | Endpoint                              | Purpose                                           |
+| ------- | ------------------------------------- | ------------------------------------------------- |
+| `GET`  | `/export/resources`                 | Export resources + latest active rates as CSV     |
+| `GET`  | `/export/allocations`               | Export allocations for given filters as CSV       |
+| `GET`  | `/export/audit-log`                 | Export audit records with filters (Admin only)    |
+| `GET`  | `/export/projects/{id}/gantt`       | Export Gantt chart data as JSON or PDF            |
+
+**Filename format:** `{entity}_export_YYYY-MM-DD_HHMM.csv`. Max rows per export: 100,000.
+
+### 5.9 Report APIs
+
+| Method  | Endpoint                        | Purpose                                         |
+| ------- | ------------------------------- | ------------------------------------------------ |
+| `GET`  | `/reports/project-budget`     | Budget vs actual spend per project (tabular)     |
+| `GET`  | `/reports/utilization`        | Resource utilization heatmap by skill/cost center |
+| `GET`  | `/reports/rate-variance`      | Historical rate change analysis across resources |
+
+All report endpoints support date range filters and CSV export.
 
 ---
 
@@ -525,82 +686,192 @@ All error responses follow this envelope:
 
 **Decision Rationale:**
 
-- Use **400** for syntactic validation (Pydantic `ValidationError`)
+- Use **400** for syntactic validation (Jakarta Validation `ConstraintViolationException`)
 - Use **422** for semantic business rule violations (allocation constraints, budget exceeded)
 - Use **409** for uniqueness conflicts and optimistic lock failures
 - Always include `request_id` in logs to correlate client error with server-side trace
 
-#### 5.6.3 Global Exception Handler (FastAPI)
+#### 5.6.3 Global Exception Handler (Spring Boot @ControllerAdvice)
 
-```python
-# backend/app/core/exceptions.py
-from fastapi import Request
-from fastapi.responses import JSONResponse
-from starlette.status import *
+```java
+// backend/src/main/java/com/pod/web/exception/GlobalExceptionHandler.java
+@RestControllerAdvice
+@RequiredArgsConstructor
+@Slf4j
+public class GlobalExceptionHandler {
 
-class APIError(BaseException):
-    def __init__(self, code: str, message: str, status_code: int = 400, details: dict = None):
-        self.code = code
-        self.message = message
-        self.status_code = status_code
-        self.details = details or {}
+    private final ObjectMapper objectMapper;
 
-@app.exception_handler(APIError)
-async def api_error_handler(request: Request, exc: APIError):
-    return JSONResponse(
-        status_code=exc.status_code,
-        content={
-            "success": False,
-            "error": {
-                "code": exc.code,
-                "message": exc.message,
-                "details": exc.details,
-                "suggested_fixes": getattr(exc, "suggested_fixes", []),
-                "request_id": request.state.request_id,
-                "timestamp": datetime.utcnow().isoformat() + "Z",
+    // 1. Custom application errors
+    @ExceptionHandler(ApiException.class)
+    public ResponseEntity<ApiResponse<Object>> handleApiException(
+            ApiException ex, HttpServletRequest request) {
+
+        Map<String, Object> errorDetails = Map.of(
+            "code", ex.getCode(),
+            "message", ex.getMessage(),
+            "details", ex.getDetails(),
+            "suggestedFixes", ex.getSuggestedFixes(),
+            "requestId", RequestContext.getRequestId(),
+            "timestamp", OffsetDateTime.now().toString()
+        );
+
+        ApiResponse<Object> response = ApiResponse.<Object>builder()
+            .success(false)
+            .error(ApiResponse.ErrorEnvelope.builder()
+                .code(ex.getCode())
+                .message(ex.getMessage())
+                .details(ex.getDetails())
+                .suggestedFixes(ex.getSuggestedFixes())
+                .requestId(RequestContext.getRequestId())
+                .timestamp(OffsetDateTime.now().toString())
+                .build())
+            .requestId(RequestContext.getRequestId())
+            .timestamp(OffsetDateTime.now().toString())
+            .build();
+
+        return ResponseEntity
+            .status(HttpStatus.valueOf(ex.getStatus().value()))
+            .body(response);
+    }
+
+    // 2. JPA/Hibernate exceptions
+    @ExceptionHandler(DataIntegrityViolationException.class)
+    public ResponseEntity<ApiResponse<Object>> handleDataIntegrity(
+            DataIntegrityViolationException ex, HttpServletRequest request) {
+
+        String message = "Database constraint violation";
+        String code = "DATABASE_CONSTRAINT_VIOLATION";
+
+        Throwable rootCause = ExceptionUtils.getRootCause(ex);
+        if (rootCause != null && rootCause.getMessage() != null) {
+            String msg = rootCause.getMessage().toLowerCase();
+            if (msg.contains("unique") || msg.contains("duplicate")) {
+                code = "DUPLICATE_KEY";
+                message = "A record with this identifier already exists";
             }
         }
-    )
 
-@app.exception_handler(sqlalchemy.exc.IntegrityError)
-async def integrity_error_handler(request: Request, exc: sqlalchemy.exc.IntegrityError):
-    # Detect unique constraint violation vs foreign key violation
-    if "unique constraint" in str(exc).lower():
-        raise APIError(
-            code="DUPLICATE_KEY",
-            message="A record with this identifier already exists",
-            status_code=409,
-            details={"constraint": extract_constraint_name(exc)}
-        )
-    raise APIError(
-        code="DATABASE_CONSTRAINT_VIOLATION",
-        message="Foreign key or check constraint violated",
-        status_code=409
-    )
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+            .body(ApiResponse.error(code, message,
+                RequestContext.getRequestId()));
+    }
+
+    // 3. Validation (Jakarta Validation) exceptions
+    @ExceptionHandler(MethodArgumentNotValidException.class)
+    public ResponseEntity<ApiResponse<Object>> handleValidation(
+            MethodArgumentNotValidException ex, HttpServletRequest request) {
+
+        List<String> errors = ex.getBindingResult()
+            .getFieldErrors()
+            .stream()
+            .map(err -> String.format("%s: %s", err.getField(), err.getDefaultMessage()))
+            .toList();
+
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+            .body(ApiResponse.error(
+                "VALIDATION_FAILED",
+                "Request validation failed",
+                RequestContext.getRequestId(),
+                errors));
+    }
+
+    // 4. Entity not found
+    @ExceptionHandler(EntityNotFoundException.class)
+    public ResponseEntity<ApiResponse<Object>> handleNotFound(
+            EntityNotFoundException ex, HttpServletRequest request) {
+
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+            .body(ApiResponse.error(
+                "NOT_FOUND",
+                ex.getMessage(),
+                RequestContext.getRequestId()));
+    }
+
+    // Fallback for unhandled exceptions
+    @ExceptionHandler(Exception.class)
+    public ResponseEntity<ApiResponse<Object>> handleUnhandled(
+            Exception ex, HttpServletRequest request) {
+
+        log.error("Unhandled exception: requestId={}", RequestContext.getRequestId(), ex);
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+            .body(ApiResponse.error(
+                "INTERNAL_ERROR",
+                "An unexpected error occurred",
+                RequestContext.getRequestId()));
+    }
+}
 ```
 
-#### 5.6.4 Request ID Propagation
+#### 5.6.4 Request ID Propagation (Spring Filter)
 
-Every request gets a unique `X-Request-ID` header:
+Every request gets a unique `X-Request-ID` header via servlet filter:
 
-```python
-# backend/app/middleware/request_id.py
-@app.middleware("http")
-async def add_request_id(request: Request, call_next):
-    request_id = request.headers.get("X-Request-ID", str(uuid.uuid4()))
-    request.state.request_id = request_id
-  
-    response = await call_next(request)
-    response.headers["X-Request-ID"] = request_id
-    return response
+```java
+// backend/src/main/java/com/pod/filter/RequestIdFilter.java
+@Component
+@Order(Ordered.HIGHEST_PRECEDENCE)
+public class RequestIdFilter implements Filter {
+
+    private static final String REQUEST_ID_HEADER = "X-Request-ID";
+    private static final String REQUEST_ID_MDC_KEY = "requestId";
+    private final ThreadLocal<String> requestIdHolder = new ThreadLocal<>();
+
+    @Override
+    public void doFilter(ServletRequest req, ServletResponse res, FilterChain chain)
+            throws IOException, ServletException {
+
+        HttpServletRequest request = (HttpServletRequest) req;
+        String requestId = request.getHeader(REQUEST_ID_HEADER);
+
+        if (requestId == null || requestId.isBlank()) {
+            requestId = UUID.randomUUID().toString();
+        }
+
+        requestIdHolder.set(requestId);
+        RequestContext.setRequestId(requestId);  // MDC + ThreadLocal context
+
+        try {
+            chain.doFilter(req, res);
+        } finally {
+            requestIdHolder.remove();
+            RequestContext.clear();
+        }
+    }
+}
+
+// RequestContext.java — holds request-scoped ThreadLocal
+public class RequestContext {
+    private static final ThreadLocal<String> REQUEST_ID = new ThreadLocal<>();
+
+    public static void setRequestId(String id) {
+        REQUEST_ID.set(id);
+        MDC.put("requestId", id);
+    }
+
+    public static String getRequestId() {
+        return REQUEST_ID.get();
+    }
+
+    public static void clear() {
+        REQUEST_ID.remove();
+        MDC.remove("requestId");
+    }
+}
+
+// Logback pattern includes requestId via %X{requestId}
 ```
 
-FastAPI logs automatically include `request_id` via structlog:
+**Logback configuration (`logback-spring.xml`):** Includes `%X{requestId}` in pattern so all SLF4J/Logback logs automatically capture the request context:
+```xml
+<pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} [%X{requestId}] - %msg%n</pattern>
+```
 
-```python
-import structlog
-logger = structlog.get_logger()
-logger.info("allocation_created", allocation_id=alloc.id, request_id=request.state.request_id)
+**Usage in services/controllers:**
+```java
+log.info("allocation_created", 
+    kv("allocationId", allocation.getId()),
+    kv("requestId", RequestContext.getRequestId()));
 ```
 
 ---
@@ -626,96 +897,291 @@ logger.info("allocation_created", allocation_id=alloc.id, request_id=request.sta
 
 Five constraints evaluated per allocation submission:
 
-```python
-class AllocationConstraintValidator:
-    def validate(self, resource_id: int, project_id: int, week_start: date, hours: float):
-        from sqlalchemy import text
+```java
+// backend/src/main/java/com/pod/service/AllocationConstraintValidator.java
+@Service
+@Slf4j
+@RequiredArgsConstructor
+public class AllocationConstraintValidator {
 
-        violations = []
-        month = YearMonth.from(week_start)
+    private final AllocationRepository allocationRepository;
 
-        # 1. Daily hours avg (5-day week) ≤ 10h/day
-        daily_avg = hours / 5
-        if daily_avg > 10:
-            violations.append(ConstraintViolation(
-                code="DAILY_HOURS_EXCEEDED",
-                message=f"Daily avg {daily_avg:.1f}h exceeds 10h max",
-                resource_id=resource_id, project_id=project_id
-            ))
+    public List<ConstraintViolation> validate(Long resourceId, Long projectId,
+                                               LocalDate weekStart, BigDecimal hours) {
 
-        # 2. Monthly total cap ≤ 144h
-        # NOTE: Only count allocations for resources with active status (not on_leave/terminated)
-        sql = text("""
-            SELECT COALESCE(SUM(a.hours), 0)
-            FROM allocations a
-            JOIN resources r ON a.resource_id = r.id
-            WHERE a.resource_id = :rid
-              AND a.is_active = TRUE
-              AND a.status = 'approved'
-              AND DATE_TRUNC('month', a.week_start_date) = :month
-              AND r.status NOT IN ('on_leave', 'terminated')
-        """)
-        existing = db.session.execute(sql, {"rid": resource_id, "month": month.start_date}).scalar_one()
-        total = existing + hours
-        if total > 144:
-            violations.append(ConstraintViolation(
-                code="MONTHLY_CAP_EXCEEDED",
-                message=f"Monthly total {total:.0f}h exceeds 144h cap",
-                resource_id=resource_id, project_id=project_id,
-                details={"current_hours": existing, "proposed_hours": hours, "total": total, "limit": 144}
-            ))
+        List<ConstraintViolation> violations = new ArrayList<>();
+        YearMonth month = YearMonth.from(weekStart);
 
-        # 3. Monthly OT cap ≤ 36h
-        ot = max(0, total - 144)
-        if ot > 36:
-            violations.append(ConstraintViolation(
-                code="OT_MONTHLY_CAP",
-                message=f"Monthly OT {ot:.0f}h exceeds 36h cap",
-                resource_id=resource_id, project_id=project_id
-            ))
+        // 1. Daily hours avg (5-day week) ≤ 10h/day
+        BigDecimal dailyAvg = hours.divide(BigDecimal.valueOf(5), RoundingMode.HALF_UP);
+        if (dailyAvg.compareTo(BigDecimal.valueOf(10)) > 0) {
+            violations.add(ConstraintViolation.builder()
+                .code("DAILY_HOURS_EXCEEDED")
+                .message(String.format("Daily avg %.1fh exceeds 10h max", dailyAvg))
+                .resourceId(resourceId)
+                .projectId(projectId)
+                .details(Map.of("daily_avg", dailyAvg, "limit", 10))
+                .build());
+        }
 
-        # 4. Project spread limit — ≤ 5 distinct projects/month
-        # Exclude resources on leave/terminated (JOIN with resources + status filter)
-        count_sql = text("""
-            SELECT COUNT(DISTINCT a.project_id)
-            FROM allocations a
-            JOIN resources r ON a.resource_id = r.id
-            WHERE a.resource_id = :rid
-              AND a.is_active = TRUE
-              AND a.status = 'approved'
-              AND DATE_TRUNC('month', a.week_start_date) = :month
-              AND r.status NOT IN ('on_leave', 'terminated')
-              AND a.project_id != :exclude_project_id
-        """)
-        distinct_count = db.session.execute(
-            count_sql,
-            {"rid": resource_id, "month": month.start_date, "exclude_project_id": project_id}
-        ).scalar_one()
-        if distinct_count >= 5:
-            violations.append(ConstraintViolation(
-                code="PROJECT_SPREAD_LIMIT",
-                message=f"Resource already on {distinct_count} projects; max 5",
-                resource_id=resource_id, project_id=project_id,
-                details={"current_project_count": distinct_count, "limit": 5}
-            ))
+        // 2. Monthly total cap ≤ 144h (active resources only)
+        BigDecimal existing = allocationRepository.sumApprovedHoursForActiveResource(resourceId, month);
+        BigDecimal total = existing.add(hours);
+        if (total.compareTo(BigDecimal.valueOf(144)) > 0) {
+            violations.add(ConstraintViolation.builder()
+                .code("MONTHLY_CAP_EXCEEDED")
+                .message(String.format("Monthly total %.0fh exceeds 144h cap", total))
+                .resourceId(resourceId)
+                .projectId(projectId)
+                .details(Map.of(
+                    "current_hours", existing,
+                    "proposed_hours", hours,
+                    "total", total,
+                    "limit", 144
+                ))
+                .build());
+        }
 
-        # 5. Budget validation handled separately by AllocationService to avoid circular dependency
-        return violations
+        // 3. Monthly OT cap ≤ 36h (OT = max(0, total – 144))
+        BigDecimal ot = total.subtract(BigDecimal.valueOf(144)).max(BigDecimal.ZERO);
+        if (ot.compareTo(BigDecimal.valueOf(36)) > 0) {
+            violations.add(ConstraintViolation.builder()
+                .code("OT_MONTHLY_CAP")
+                .message(String.format("Monthly OT %.0fh exceeds 36h cap", ot))
+                .resourceId(resourceId)
+                .projectId(projectId)
+                .details(Map.of("ot_hours", ot, "limit", 36))
+                .build());
+        }
+
+        // 4. Project spread limit — ≤ 5 distinct projects/month
+        Long projectCount = allocationRepository.countDistinctActiveProjectsInMonth(
+            resourceId, month, projectId);
+        if (projectCount >= 5) {
+            violations.add(ConstraintViolation.builder()
+                .code("PROJECT_SPREAD_LIMIT")
+                .message(String.format("Resource already on %d projects; max 5", projectCount))
+                .resourceId(resourceId)
+                .projectId(projectId)
+                .details(Map.of("current_project_count", projectCount, "limit", 5))
+                .build());
+        }
+
+        // Budget validation handled by BudgetValidationService separately
+        return violations;
+    }
+}
 ```
 
-**Repository helpers required:**
+**Repository helpers (JPA @Query with JPQL/Criteria API):**
 
-- `sum_approved_active_resource_hours_by_resource_month(resource_id, month)` — performs JOIN with resources status filter
-- `count_distinct_active_projects_in_month(resource_id, month, exclude_project_id)` — same
+```java
+// AllocationRepository.java
+@Query("SELECT COALESCE(SUM(a.hours), 0) FROM Allocation a " +
+       "JOIN Resource r ON a.resource.id = r.id " +
+       "WHERE a.resource.id = :resourceId AND a.active = true " +
+       "AND a.status = 'APPROVED' AND r.status IN ('ACTIVE') " +
+       "AND FUNCTION('DATE_TRUNC', 'month', a.weekStartDate) = :month")
+BigDecimal sumApprovedHoursForActiveResource(
+    @Param("resourceId") Long resourceId,
+    @Param("month") YearMonth month);
 
-**Database index required for performance:**
+@Query("SELECT COUNT(DISTINCT a.project.id) FROM Allocation a " +
+       "JOIN Resource r ON a.resource.id = r.id " +
+       "WHERE a.resource.id = :resourceId AND a.active = true " +
+       "AND a.status = 'APPROVED' AND r.status IN ('ACTIVE') " +
+       "AND FUNCTION('DATE_TRUNC', 'month', a.weekStartDate) = :month " +
+       "AND a.project.id != :excludeProjectId")
+Long countDistinctActiveProjectsInMonth(
+    @Param("resourceId") Long resourceId,
+    @Param("month") YearMonth month,
+    @Param("excludeProjectId") Long excludeProjectId);
+```
+
+**Database partial indexes for performance:**
 
 ```sql
 CREATE INDEX idx_allocations_resource_month_active
     ON allocations(resource_id, week_start_date, is_active, status)
-    WHERE is_active = TRUE AND status = 'approved';
+    WHERE is_active = true AND status = 'approved';
+
 CREATE INDEX idx_resources_id_status ON resources(id, status);
 ```
+
+**ConstraintViolation** is a typed error DTO (similar to TDD's ErrorType V), with fields: `code`, `message`, `resourceId`, `projectId`, `details` (Map<String, Object>).
+
+### 6.2 ResourceService — State Transition Methods
+
+**`changeStatus(Long resourceId, ResourceStatus newStatus, String reason)`**
+
+```java
+// backend/src/main/java/com/pod/service/ResourceService.java
+@Service
+@Slf4j
+@RequiredArgsConstructor
+public class ResourceService {
+
+    private final ResourceRepository resourceRepository;
+    private final AuditService auditService;
+
+    @Transactional
+    public ResourceDTO changeStatus(Long resourceId, ResourceStatus newStatus, String reason) {
+        Resource resource = resourceRepository.findByIdWithLock(resourceId, LockModeType.PESSIMISTIC_WRITE)
+            .orElseThrow(() -> new ResourceNotFoundException(resourceId));
+
+        ResourceStatus oldStatus = resource.getStatus();
+
+        // Validate transition rules
+        if (!isValidTransition(oldStatus, newStatus)) {
+            throw new InvalidStatusTransitionException(
+                String.format("Cannot transition from %s to %s", oldStatus, newStatus));
+        }
+
+        resource.setStatus(newStatus);
+        resource.setUpdatedAt(Instant.now());
+        resourceRepository.save(resource);
+
+        // Audit log
+        auditService.logStatusChange(
+            AuditEntityType.RESOURCE, resourceId,
+            "status", oldStatus.name(), newStatus.name(),
+            reason != null ? reason : "Status update via ResourceService.changeStatus()");
+
+        log.info("Resource {} status changed {} → {} by {}",
+            resourceId, oldStatus, newStatus, SecurityContextHolder.getContext().getAuthentication().getName());
+
+        return ResourceMapper.toDTO(resource);
+    }
+
+    private boolean isValidTransition(ResourceStatus from, ResourceStatus to) {
+        // ALLOWED: active → on-leave, on-leave → active, active → terminated
+        // DENIED: terminated → any (closed cycle)
+        return switch (from) {
+            case ACTIVE -> to == ON_LEAVE || to == TERMINATED;
+            case ON_LEAVE -> to == ACTIVE;
+            case TERMINATED -> false;
+            default -> false;
+        };
+    }
+}
+```
+
+**Repository helper for PESSIMISTIC_WRITE locking (prevent concurrent status edits):**
+
+```java
+// backend/src/main/java/com/pod/repository/ResourceRepository.java
+@Repository
+public interface ResourceRepository extends JpaRepository<Resource, Long> {
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT r FROM Resource r WHERE r.id = :id")
+    Optional<Resource> findByIdWithLock(@Param("id") Long id);
+}
+```
+
+### 6.3 ProjectService — Terminal Status Transitions
+
+**`transitionToTerminal(Long projectId, ProjectStatus targetStatus, String reason)`**
+
+```java
+// backend/src/main/java/com/pod/service/ProjectService.java
+@Service
+@Slf4j
+@RequiredArgsConstructor
+public class ProjectService {
+
+    private final ProjectRepository projectRepository;
+    private final AllocationRepository allocationRepository;
+    private final AuditService auditService;
+
+    @Transactional
+    public ProjectDTO transitionToTerminal(Long projectId, ProjectStatus targetStatus, String reason) {
+        Project project = projectRepository.findByIdWithLock(projectId, LockModeType.PESSIMISTIC_WRITE)
+            .orElseThrow(() -> new ProjectNotFoundException(projectId));
+
+        ProjectStatus oldStatus = project.getStatus();
+
+        // Only terminal states allowed: COMPLETED, CANCELLED, SUSPENDED
+        if (!targetStatus.isTerminal()) {
+            throw new IllegalArgumentException("targetStatus must be a terminal state: COMPLETED, CANCELLED, or SUSPENDED");
+        }
+
+        // Validate: no PENDING allocations may exist
+        Long pendingCount = allocationRepository.countByProjectIdAndStatus(projectId, AllocationStatus.PENDING);
+        if (pendingCount > 0) {
+            throw new IllegalStateException(
+                String.format("Cannot transition to %s: %d pending allocations must be approved or withdrawn first",
+                targetStatus, pendingCount));
+        }
+
+        // OPTIONAL: soft-close all allocations if transitioning to CANCELLED/SUSPENDED
+        if (targetStatus == ProjectStatus.CANCELLED || targetStatus == ProjectStatus.SUSPENDED) {
+            allocationRepository.softCloseAllByProject(projectId, targetStatus.name());
+            log.info("Soft-closed all allocations for project {} due to status change to {}",
+                projectId, targetStatus);
+        }
+
+        project.setStatus(targetStatus);
+        project.setUpdatedAt(Instant.now());
+        projectRepository.save(project);
+
+        // Audit trail
+        auditService.logStatusChange(
+            AuditEntityType.PROJECT, projectId,
+            "status", oldStatus.name(), targetStatus.name(),
+            reason != null ? reason : "Terminal transition via ProjectService.transitionToTerminal()");
+
+        log.info("Project {} status {} → {} by {}", projectId, oldStatus, targetStatus,
+            SecurityContextHolder.getContext().getAuthentication().getName());
+
+        return ProjectMapper.toDTO(project);
+    }
+}
+```
+
+**Repository helpers:**
+
+```java
+// backend/src/main/java/com/pod/repository/ProjectRepository.java
+@Repository
+public interface ProjectRepository extends JpaRepository<Project, Long> {
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT p FROM Project p WHERE p.id = :id")
+    Optional<Project> findByIdWithLock(@Param("id") Long id);
+}
+
+// backend/src/main/java/com/pod/repository/AllocationRepository.java
+public interface AllocationRepository extends JpaRepository<Allocation, Long> {
+
+    @Modifying
+    @Query("UPDATE Allocation a SET a.isActive = false, a.status = :status, a.updatedAt = NOW() " +
+           "WHERE a.project.id = :projectId AND a.isActive = true")
+    int softCloseAllByProject(@Param("projectId") Long projectId, @Param("status") String status);
+
+    @Query("SELECT COUNT(a) FROM Allocation a WHERE a.project.id = :projectId AND a.status = 'PENDING'")
+    long countByProjectIdAndStatus(@Param("projectId") Long projectId, AllocationStatus status);
+}
+```
+
+**`ProjectStatus.isTerminal()` helper:**
+
+```java
+public enum ProjectStatus {
+    DRAFT,
+    ACTIVE,
+    ON_HOLD,
+    COMPLETED,   // terminal
+    CANCELLED,   // terminal
+    SUSPENDED;   // terminal
+
+    public boolean isTerminal() {
+        return this == COMPLETED || this == CANCELLED || this == SUSPENDED;
+    }
+}
+```
+
+**Guarded transition plan:** `DRAFT` → `ACTIVE` (no checks), `ACTIVE` → `ON_HOLD` / `COMPLETED` / `CANCELLED` / `SUSPENDED`, `ON_HOLD` → `ACTIVE` only. All other transitions rejected.
 
 ---
 
@@ -723,62 +1189,104 @@ CREATE INDEX idx_resources_id_status ON resources(id, status);
 
 **Algorithm:** Topological sort (Kahn's) + forward/backward pass.
 
-```python
-def calculate_critical_path(project_id: int) -> CriticalPathResult:
-    from collections import defaultdict, deque
+```java
+// backend/src/main/java/com/pod/service/GanttService.java
+@Service
+@Slf4j
+@RequiredArgsConstructor
+public class GanttService {
 
-    activities = repo.get_by_project(project_id)
-    # Build adjacency list and indegree map
-    adj = defaultdict(list)
-    indegree = {a.id: 0 for a in activities}
-    for a in activities:
-        for pred_id in a.predecessor_ids:
-            adj[pred_id].append(a.id)
-            indegree[a.id] += 1
+    private final ActivityRepository activityRepository;
 
-    # Topological order
-    queue = deque([n for n, d in indegree.items() if d == 0])
-    topo = []
-    while queue:
-        node = queue.popleft()
-        topo.append(node)
-        for succ in adj[node]:
-            indegree[succ] -= 1
-            if indegree[succ] == 0:
-                queue.append(succ)
+    public CriticalPathResult calculateCriticalPath(Long projectId) {
+        List<Activity> activities = activityRepository.findByProjectIdWithDependencies(projectId);
 
-    if len(topo) != len(activities):
-        raise CycleDetectedException("Cycle in activity dependencies")
+        // Build adjacency list and indegree map
+        Map<Long, List<Long>> adj = new HashMap<>();
+        Map<Long, Integer> indegree = new HashMap<>();
+        for (Activity act : activities) {
+            adj.putIfAbsent(act.getId(), new ArrayList<>());
+            indegree.put(act.getId(), 0);
+        }
+        for (Activity act : activities) {
+            for (ActivityDependency dep : act.getPredecessors()) {
+                Long predId = dep.getPredecessor().getId();
+                adj.get(predId).add(act.getId());
+                indegree.put(act.getId(), indegree.get(act.getId()) + 1);
+            }
+        }
 
-    # Forward pass (ES/EF)
-    es, ef = {}, {}
-    for node in topo:
-        act = find_by_id(activities, node)
-        pred_ef = [ef[p] for p in act.predecessor_ids]
-        es[node] = max(pred_ef, default=0)
-        duration_days = (act.planned_end_date - act.planned_start_date).days + 1
-        ef[node] = es[node] + duration_days
+        // Topological sort (Kahn's)
+        Deque<Long> queue = new ArrayDeque<>();
+        for (Map.Entry<Long, Integer> e : indegree.entrySet()) {
+            if (e.getValue() == 0) queue.add(e.getKey());
+        }
+        List<Long> topo = new ArrayList<>();
+        while (!queue.isEmpty()) {
+            Long node = queue.poll();
+            topo.add(node);
+            for (Long succ : adj.get(node)) {
+                indegree.put(succ, indegree.get(succ) - 1);
+                if (indegree.get(succ) == 0) queue.add(succ);
+            }
+        }
+        if (topo.size() != activities.size()) {
+            throw new CycleDetectedException("Cycle in activity dependencies");
+        }
 
-    project_duration = max(ef.values())
+        // Forward pass (ES/EF)
+        Map<Long, Integer> es = new HashMap<>();
+        Map<Long, Integer> ef = new HashMap<>();
+        for (Long node : topo) {
+            Activity act = findById(activities, node);
+            int predEfMax = act.getPredecessors().stream()
+                .mapToInt(d -> ef.get(d.getPredecessor().getId()))
+                .max()
+                .orElse(0);
+            es.put(node, predEfMax);
+            long durationDays = ChronoUnit.DAYS.between(
+                act.getPlannedStartDate(), act.getPlannedEndDate()) + 1;
+            ef.put(node, predEfMax + (int)durationDays);
+        }
+        int projectDuration = ef.values().stream().mapToInt(Integer::intValue).max().orElse(0);
 
-    # Backward pass (LF/LS)
-    lf, ls = {}, {}
-    for node in reversed(topo):
-        succ_ls = [ls[s] for s in adj[node]]
-        lf[node] = min(succ_ls, default=project_duration)
-        duration_days = (find_by_id(activities, node).planned_end_date -
-                         find_by_id(activities, node).planned_start_date).days + 1
-        ls[node] = lf[node] - duration_days
+        // Backward pass (LF/LS)
+        Map<Long, Integer> lf = new HashMap<>();
+        Map<Long, Integer> ls = new HashMap<>();
+        List<Long> reversed = new ArrayList<>(topo);
+        Collections.reverse(reversed);
+        for (Long node : reversed) {
+            Activity act = findById(activities, node);
+            List<Integer> succLs = act.getSuccessors().stream()
+                .map(s -> ls.get(s.getSuccessor().getId()))
+                .toList();
+            int lfVal = succLs.isEmpty() ? projectDuration : Collections.min(succLs);
+            lf.put(node, lfVal);
+            long durationDays = ChronoUnit.DAYS.between(
+                act.getPlannedStartDate(), act.getPlannedEndDate()) + 1;
+            ls.put(node, lfVal - (int)durationDays);
+        }
 
-    # Total float = LS - ES
-    critical_path = [a for a in activities if abs(ls[a.id] - es[a.id]) < 0.5]  # float-safe
+        // Critical path = zero float activities
+        List<Activity> criticalPath = activities.stream()
+            .filter(a -> Math.abs(ls.get(a.getId()) - es.get(a.getId())) < 0.5)
+            .toList();
 
-    return CriticalPathResult(
-        critical_activities=critical_path,
-        total_duration_days=project_duration,
-        earliest_start=es,
-        latest_finish=lf
-    )
+        return CriticalPathResult.builder()
+            .criticalActivities(criticalPath)
+            .totalDurationDays(projectDuration)
+            .earliestStart(es)
+            .latestFinish(lf)
+            .build();
+    }
+
+    private Activity findById(List<Activity> activities, Long id) {
+        return activities.stream()
+            .filter(a -> a.getId().equals(id))
+            .findFirst()
+            .orElseThrow(() -> new EntityNotFoundException("Activity not found: " + id));
+    }
+}
 ```
 
 ---
@@ -787,50 +1295,135 @@ def calculate_critical_path(project_id: int) -> CriticalPathResult:
 
 **Priority order:** Availability → Skill Match → Cost (hourly rate ascending)
 
-```python
-from dataclasses import dataclass
-from typing import List, Union
+```java
+// backend/src/main/java/com/pod/service/AutoAllocationService.java
+@Service
+@Slf4j
+@RequiredArgsConstructor
+public class AutoAllocationService {
 
-@dataclass
-class AutoAllocationSuccess:
-    resource_id: int
-    project_id: int
-    activity_id: int
-    hours: float
-    allocation_id: int
+    private final ResourceRepository resourceRepository;
+    private final ActivityRepository activityRepository;
+    private final AllocationService allocationService;
+    private final DashboardService dashboardService;
 
-@dataclass
-class AutoAllocationFailure:
-    activity_id: int
-    error_code: str  # "NO_CANDIDATE", "NO_CAPACITY", "BUDGET_EXCEEDED", "SKILL_MISMATCH"
-    hours: float
-    reason: str
+    @Transactional
+    public AutoAllocationResult autoAllocate(Long projectId, boolean simulate) {
+        List<Activity> unassigned = activityRepository.findUnassignedByProjectId(projectId);
+        List<Resource> candidates = resourceRepository.findAvailableForAllocation();
 
-def auto_allocate(project_id: int, simulate: bool = False) -> AutoAllocationResult:
-    """
-    Heuristic auto-allocation engine. Returns success/failure per activity.
-    Does NOT modify database when simulate=True.
-    """
-    unassigned = get_unassigned_activities(project_id)  # [(activity_id, hours_needed), ...]
-    candidates = get_available_resources()  # pre-filtered list
+        List<AutoAllocationSuccess> successes = new ArrayList<>();
+        List<AutoAllocationFailure> failures = new ArrayList<>();
 
-    successes: List[AutoAllocationSuccess] = []
-    failures: List[AutoAllocationFailure] = []
+        for (Activity activity : unassigned) {
+            Long activityId = activity.getId();
+            BigDecimal hours = activity.getEstimatedHours();
 
-    for activity_id, hours in unassigned:
-        # Step 1: skill match (minimum level threshold)
-        skill_matches = [r for r in candidates if r.skill_level >= required_skill_level(activity_id)]
+            // Step 1: skill match (minimum level threshold)
+            String requiredSkill = activity.getRequiredSkill();
+            Integer requiredLevel = activity.getRequiredLevel();
+            List<Resource> skillMatches = candidates.stream()
+                .filter(r -> matchesSkill(r, requiredSkill, requiredLevel))
+                .toList();
 
-        # Step 2: capacity filter (resource.available_capacity in target month >= hours)
-        capacity_ok = [r for r in skill_matches if r.available_capacity(activity.week_start) >= hours]
+            if (skillMatches.isEmpty()) {
+                failures.add(AutoAllocationFailure.builder()
+                    .activityId(activityId)
+                    .errorCode("SKILL_MISMATCH")
+                    .hours(hours)
+                    .reason("No resource matches required skill/level")
+                    .build());
+                continue;
+            }
 
-        # Step 3: project count cap (< 5 distinct projects in target month — active resources only)
-        proj_count_ok = [r for r in capacity_ok if r.active_project_count(activity.week_start) < 5]
+            // Step 2: capacity filter (available capacity in target month >= hours)
+            YearMonth targetMonth = YearMonth.from(activity.getPlannedStartDate());
+            List<Resource> capacityOk = skillMatches.stream()
+                .filter(r -> r.getRemainingCapacity(targetMonth).compareTo(hours) >= 0)
+                .toList();
 
-        # Step 4: budget check (project.remaining_budget >= hours * r.hourly_rate)
-        budget_ok = [r for r in proj_count_ok if project.remaining_budget_K >= (hours * r.hourly_rate_K / 144)]
+            if (capacityOk.isEmpty()) {
+                failures.add(AutoAllocationFailure.builder()
+                    .activityId(activityId)
+                    .errorCode("NO_CAPACITY")
+                    .hours(hours)
+                    .reason("No resource has sufficient capacity in target month")
+                    .build());
+                continue;
+            }
 
-        # Step 5: sort by rate ascending (cheapest first)
+            // Step 3: project count cap (< 5 distinct projects in target month)
+            List<Resource> projCountOk = capacityOk.stream()
+                .filter(r -> r.getActiveProjectCount(targetMonth) < 5)
+                .toList();
+
+            if (projCountOk.isEmpty()) {
+                failures.add(AutoAllocationFailure.builder()
+                    .activityId(activityId)
+                    .errorCode("PROJECT_SPREAD_LIMIT")
+                    .hours(hours)
+                    .reason("All candidates already assigned to 5+ projects")
+                    .build());
+                continue;
+            }
+
+            // Step 4: budget check
+            BigDecimal rateCost = dashboardService.calculateRateCost(projectId);
+            BigDecimal budgetRemaining = activity.getProject().getBudgetRemainingK();
+            List<Resource> budgetOk = projCountOk.stream()
+                .filter(r -> budgetRemaining.compareTo(hours.multiply(r.getHourlyRateK()).divide(
+                    BigDecimal.valueOf(144), RoundingMode.HALF_UP)) >= 0)
+                .toList();
+
+            if (budgetOk.isEmpty()) {
+                failures.add(AutoAllocationFailure.builder()
+                    .activityId(activityId)
+                    .errorCode("BUDGET_EXCEEDED")
+                    .hours(hours)
+                    .reason("Project budget exhausted for all candidate resources")
+                    .build());
+                continue;
+            }
+
+            // Step 5: sort by rate ascending, pick cheapest
+            Resource selected = budgetOk.stream()
+                .min(Comparator.comparing(Resource::getHourlyRateK))
+                .orElseThrow();
+
+            if (!simulate) {
+                Allocation allocation = allocationService.createAllocation(
+                    selected.getId(), projectId, activityId, hours
+                );
+                successes.add(AutoAllocationSuccess.builder()
+                    .resourceId(selected.getId())
+                    .projectId(projectId)
+                    .activityId(activityId)
+                    .hours(hours)
+                    .allocationId(allocation.getId())
+                    .build());
+            } else {
+                successes.add(AutoAllocationSuccess.builder()
+                    .resourceId(selected.getId())
+                    .projectId(projectId)
+                    .activityId(activityId)
+                    .hours(hours)
+                    .allocationId(null)  // simulate mode
+                    .build());
+            }
+        }
+
+        return AutoAllocationResult.builder()
+            .successes(successes)
+            .failures(failures)
+            .build();
+    }
+
+    private boolean matchesSkill(Resource r, String requiredSkill, Integer requiredLevel) {
+        return requiredSkill == null || (r.getSkill() != null && r.getSkill().equals(requiredSkill))
+            && (requiredLevel == null || r.getLevel() != null && r.getLevel() >= requiredLevel);
+    }
+}
+```
         budget_ok.sort(key=lambda r: r.hourly_rate_K)
 
         if not budget_ok:
@@ -1425,6 +2018,97 @@ ORDER BY p.id;
 CREATE INDEX idx_mv_project_burn ON mv_project_burn(project_id);
 ```
 
+**`mv_utilization_monthly`:**
+
+```sql
+CREATE MATERIALIZED VIEW mv_utilization_monthly AS
+SELECT
+    DATE_TRUNC('month', a.week_start_date) as month,
+    r.id as resource_id,
+    r.name as resource_name,
+    r.cost_center_id,
+    r.billable_team_code,
+    COALESCE(SUM(a.hours), 0) as assigned_hours,
+    ROUND(
+      COALESCE(SUM(a.hours) / (CASE
+        WHEN EXISTS (
+          SELECT 1 FROM holidays h
+          WHERE h.cost_center_filter @> r.cost_center_id::jsonb
+            AND EXTRACT(MONTH FROM h.holiday_date) = EXTRACT(MONTH FROM a.week_start_date)
+        ) THEN 144.0 - 20.0
+        ELSE 144.0
+      END) * 100, 2)
+    ) as utilization_pct
+FROM resources r
+LEFT JOIN allocations a ON r.id = a.resource_id
+    AND a.is_active = TRUE AND a.status = 'approved'
+    AND EXTRACT(YEAR FROM a.week_start_date) = EXTRACT(YEAR FROM CURRENT_DATE)
+WHERE r.is_active = TRUE
+GROUP BY DATE_TRUNC('month', a.week_start_date), r.id, r.name, r.cost_center_id, r.billable_team_code
+ORDER BY month DESC, resource_id;
+
+CREATE UNIQUE INDEX idx_mv_utilization_monthly
+    ON mv_utilization_monthly(month, resource_id);
+```
+
+**`mv_overplan_conflicts`:**
+
+```sql
+CREATE MATERIALIZED VIEW mv_overplan_conflicts AS
+SELECT
+    DATE_TRUNC('month', a.week_start_date) as month,
+    r.id as resource_id,
+    r.name as resource_name,
+    COUNT(DISTINCT p.id) as project_count,
+    CASE
+        WHEN COUNT(DISTINCT p.id) > 5 THEN 'OVERPLAN_DETECTED'
+        ELSE 'OK'
+    END as status
+FROM resources r
+JOIN allocations a ON r.id = a.resource_id AND a.is_active = TRUE AND a.status = 'approved'
+JOIN projects p ON a.project_id = p.id AND p.is_active = TRUE
+WHERE EXTRACT(YEAR FROM a.week_start_date) = EXTRACT(YEAR FROM CURRENT_DATE)
+GROUP BY DATE_TRUNC('month', a.week_start_date), r.id, r.name
+HAVING COUNT(DISTINCT p.id) > 5
+ORDER BY month DESC, resource_id;
+
+CREATE INDEX idx_mv_overplan_conflicts ON mv_overplan_conflicts(month, resource_id, status);
+```
+
+**`mv_cash_flow_forecast`:**
+
+```sql
+CREATE MATERIALIZED VIEW mv_cash_flow_forecast AS
+SELECT
+    DATE_TRUNC('month', a.week_start_date) as month,
+    COALESCE(SUM(
+      a.hours * (rate.monthly_rate_K / 144.0)
+    ), 0) as committed_cash_flow_K,
+    COUNT(DISTINCT a.resource_id) as committed_hcm
+FROM allocations a
+JOIN resources r ON a.resource_id = r.id
+LEFT JOIN LATERAL (
+    SELECT monthly_rate_K FROM rates rate
+    WHERE rate.cost_center_id = r.cost_center_id
+      AND rate.billable_team_code = r.billable_team_code
+      AND rate.effective_from <= TO_CHAR(a.week_start_date, 'YYYYMM')
+      AND rate.effective_to >= TO_CHAR(a.week_start_date, 'YYYYMM')
+      AND rate.is_active = TRUE LIMIT 1
+) rate ON true
+WHERE a.is_active = TRUE AND a.status = 'approved'
+GROUP BY DATE_TRUNC('month', a.week_start_date)
+ORDER BY month DESC;
+
+CREATE UNIQUE INDEX idx_mv_cash_flow_forecast ON mv_cash_flow_forecast(month);
+```
+
+These four materialized views underpin the Dashboard KPIs:
+- `mv_supply_demand_monthly`: headcount + allocated HCM per cost center/team per month
+- `mv_project_burn`: budget vs actual spend per project
+- `mv_utilization_monthly`: per-resource monthly utilization rate (billable hours ÷ 144 – holiday-adjusted)
+- `mv_overplan_conflicts`: resources assigned to >5 projects in a month (preemptive warning)
+- `mv_cash_flow_forecast`: forward-looking committed cash outflow based on approved allocations
+
 ### 9.2 Refresh Strategy
 
 **Business Hours (09:00–18:00):** Every **5 minutes**
@@ -1432,46 +2116,74 @@ CREATE INDEX idx_mv_project_burn ON mv_project_burn(project_id);
 
 **Locking to Prevent Overlap:** Use a distributed lock (Redis-based) to ensure only one refresh job runs at a time in a multi-replica deployment.
 
-```python
-# backend/app/workers/refresh_views.py
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from apscheduler.jobstores.redis import RedisJobStore
-from redis import Redis
+```java
+// backend/src/main/java/com/pod/task/MaterializedViewRefreshTask.java
+@Component
+@Slf4j
+@RequiredArgsConstructor
+public class MaterializedViewRefreshTask {
 
-redis_client = Redis(host='redis', port=6379, db=1)
+    private final JdbcTemplate jdbcTemplate;
+    private final RedisTemplate<String, String> redisTemplate;
+    private final ApplicationEventPublisher eventPublisher;
 
-jobstores = {
-    'default': RedisJobStore(jobs_key='refreshmv_jobs', run_times_key='refreshmv_run_times', host='redis', port=6379)
+    // Business hours (09:00–18:00): every 5 minutes
+    @Scheduled(cron = "0 */5 9-17 ? * MON-FRI")
+    @SchedulerLock(name = "refreshMVBusinessHours", lockAtMostFor = "4m", lockAtLeastFor = "5m")
+    public void refreshMVBusinessHours() {
+        String lockKey = "lock:refresh_mv";
+        String instanceId = InetAddress.getLocalHost().getHostName();
+
+        Boolean acquired = redisTemplate.opsForValue()
+            .setIfAbsent(lockKey, instanceId, Duration.ofMinutes(5));
+
+        if (Boolean.FALSE.equals(acquired)) {
+            log.warn("Refresh job skipped - another instance is already running");
+            return;
+        }
+
+        try {
+            jdbcTemplate.execute("REFRESH MATERIALIZED VIEW CONCURRENTLY mv_supply_demand_monthly");
+            jdbcTemplate.execute("REFRESH MATERIALIZED VIEW CONCURRENTLY mv_project_burn");
+            jdbcTemplate.execute("REFRESH MATERIALIZED VIEW CONCURRENTLY mv_utilization_monthly");
+            jdbcTemplate.execute("REFRESH MATERIALIZED VIEW CONCURRENTLY mv_overplan_conflicts");
+            jdbcTemplate.execute("REFRESH MATERIALIZED VIEW CONCURRENTLY mv_cash_flow_forecast");
+
+            // Broadcast via Redis pub/sub to WebSocket handlers
+            redisTemplate.convertAndSend("dashboard:refresh", Map.of("type", "DASHBOARD_REFRESHED"));
+
+            log.info("MV refresh completed successfully");
+        } finally {
+            // Atomic delete via Lua script
+            String luaScript = "if redis.call(\"GET\", KEYS[1]) == ARGV[1] then return redis.call(\"DEL\", KEYS[1]) else return 0 end";
+            redisTemplate.execute(new DefaultRedisScript<>(luaScript, Long.class),
+                List.of(lockKey), instanceId);
+        }
+    }
+
+    // Off-hours (18:00–09:00): every 30 minutes
+    @Scheduled(cron = "0 0/30 18-23,0-8 ? * *")
+    @SchedulerLock(name = "refreshMVOffHours", lockAtMostFor = "25m", lockAtLeastFor = "30m")
+    public void refreshMVOffHours() {
+        refreshMVBusinessHours();
+    }
 }
-scheduler = AsyncIOScheduler(jobstores=jobstores)
-
-@scheduler.scheduled_job('cron', minute='*/5', hour='9-17', day_of_week='mon-fri', id='refresh_mv', max_instances=1, coalesce=True)
-async def refresh_mv_business_hours():
-    # Acquire lock (SET key value NX EX 300)
-    lock_acquired = redis_client.set(
-        'lock:refresh_mv',
-        socket.gethostname(),
-        nx=True,
-        ex=300  # 5 minute TTL (should never hold lock longer than this)
-    )
-    if not lock_acquired:
-        logger.warning("Refresh job skipped - another instance is already running")
-        return
-
-    try:
-        async with db.session() as s:
-            await s.execute(text("REFRESH MATERIALIZED VIEW CONCURRENTLY mv_supply_demand_monthly"))
-            await s.execute(text("REFRESH MATERIALIZED VIEW CONCURRENTLY mv_project_burn"))
-            await s.commit()
-        await websocket_manager.broadcast({"type": "DASHBOARD_REFRESHED"})
-    finally:
-        redis_client.delete('lock:refresh_mv')
-
-# Start scheduler
-scheduler.start()
 ```
 
-**Alternative (ShedLock pattern):** Use the `scheduler_coordinator` package or implement lock manually as shown above.
+**Alternative (ShedLock library):** Use `@SchedulerLock` annotation from `net.javacrumbs.shedlock` Spring Boot starter — provides distributed locking with Redis/JDBC backing store automatically. Add Maven dependencies:
+
+```xml
+<dependency>
+    <groupId>net.javacrumbs.shedlock</groupId>
+    <artifactId>shedlock-spring</artifactId>
+    <version>5.10.0</version>
+</dependency>
+<dependency>
+    <groupId>net.javacrumbs.shedlock</groupId>
+    <artifactId>shedlock-provider-redis-spring</artifactId>
+    <version>5.10.0</version>
+</dependency>
+```
 
 **Monitoring:**
 
@@ -1585,31 +2297,106 @@ Every create/update/delete on core entities writes to `audit_log` with:
 - `changed_by_user_id` (from JWT), `changed_at` (UTC), `change_reason`
 - `revision_type` (ADD/MOD/DEL)
 
-**Implementation (Python/SQLAlchemy):** Use `sqlalchemy.event` listeners for automatic capture, plus explicit service-layer audit for status transitions that require change reason.
+**Implementation (Spring Data JPA EntityListeners + AOP):** Use JPA `@EntityListeners` for automatic audit capture, plus Spring AOP `@AfterReturning` advice for status transitions requiring change reason.
 
-```python
-# backend/app/audit/listeners.py
-from sqlalchemy import event
-from sqlalchemy.orm import Session
+```java
+// backend/src/main/java/com/pod/entity/AuditLog.java
+@Entity
+@Table(name = "audit_log")
+@Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
+public class AuditLog {
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
 
-@event.listens_for(Session, "before_flush")
-def audit_before_flush(session: Session, flush_context, instances):
-    for obj in session.new | session.dirty | session.deleted:
-        if isinstance(obj, AuditMixin):  # All auditable entities inherit this
-            changes = obj.get_audit_changes()  # Returns dict: field -> (old, new)
-            for field, (old, new) in changes.items():
-                audit = AuditLog(
-                    entity_type=obj.__tablename__,
-                    entity_id=obj.id,
-                    field_name=field,
-                    old_value=json.dumps(old) if old else None,
-                    new_value=json.dumps(new) if new else None,
-                    changed_by_user_id=get_current_user_id(),  # from context var
-                    change_reason=get_audit_reason(),  # from AuditContext thread-local
-                    revision_type='ADD' if obj in session.new else
-                                    'DEL' if obj in session.deleted else 'MOD',
-                )
-                session.add(audit)
+    @Column(name = "entity_type", nullable = false, length = 50)
+    private String entityType;
+
+    @Column(name = "entity_id", nullable = false)
+    private Long entityId;
+
+    @Column(name = "field_name", length = 100)
+    private String fieldName;
+
+    @Column(name = "old_value", columnDefinition = "JSONB")
+    private JsonNode oldValue;
+
+    @Column(name = "new_value", columnDefinition = "JSONB")
+    private JsonNode newValue;
+
+    @Column(name = "changed_by_user_id")
+    private Long changedByUserId;
+
+    @Column(name = "change_reason", length = 500)
+    private String changeReason;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "revision_type", nullable = false, length = 10)
+    private RevisionType revisionType;
+
+    @Column(name = "changed_at", nullable = false)
+    private OffsetDateTime changedAt;
+}
+
+// Auditable.java — base interface for entities
+public interface Auditable {
+    String getEntityType();
+    String getRevisionType();
+    Map<String, Object> getAuditChanges(AuditContext context);
+}
+
+// AuditEntityListener.java — JPA callback interceptor
+@Component
+public class AuditEntityListener {
+
+    @PrePersist
+    public void prePersist(Object entity) {
+        if (entity instanceof Auditable auditable) {
+            AuditContext context = AuditContextHolder.getContext();
+            Long userId = context != null ? context.getUserId() : null;
+            String reason = context != null ? context.getChangeReason() : null;
+
+            Map<String, Object> changes = auditable.getAuditChanges(context);
+            changes.forEach((field, valuePair) -> {
+                Map<String, Object> change = (Map<String, Object>) valuePair;
+                AuditLog log = AuditLog.builder()
+                    .entityType(auditable.getEntityType())
+                    .entityId(extractId(entity))
+                    .fieldName(field)
+                    .oldValue(toJsonNode(change.get("old")))
+                    .newValue(toJsonNode(change.get("new")))
+                    .changedByUserId(userId)
+                    .changeReason(reason)
+                    .revisionType(RevisionType.ADD)
+                    .changedAt(OffsetDateTime.now())
+                    .build();
+                // Persist via AuditLogRepository
+            });
+        }
+    }
+
+    // Similar @PreUpdate and @PreRemove
+}
+
+// AuditContext via ThreadLocal (Spring RequestContext)
+public class AuditContext {
+    private Long userId;
+    private String changeReason;
+}
+
+// Usage in ResourceService:
+@Transactional
+public Resource updateResource(Long id, UpdateResourceRequest req) {
+    Resource resource = resourceRepository.findById(id).orElseThrow(...);
+    AuditContextHolder.setContext(AuditContext.builder()
+        .userId(currentUser.getId())
+        .changeReason("Updated skill level as part of FY2026 review")
+        .build());
+
+    resource.setSkill(req.getSkill());
+    resource.setLevel(req.getLevel());
+    return resourceRepository.save(resource);
+}
 ```
 
 **Entities to Audit:** `resources`, `projects`, `activities`, `allocations`, `rates`, `holidays`, `activity_dependencies`.
@@ -1636,12 +2423,41 @@ def audit_before_flush(session: Session, flush_context, instances):
 
 ### 14.1 Event Matrix
 
-| Event Type                    | Trigger            | Channel        | Priority |
-| ----------------------------- | ------------------ | -------------- | -------- |
-| `ALLOCATION_SUBMITTED`      | PM creates PENDING | In-app + Email | High     |
-| `ALLOCATION_APPROVED`       | POD approves       | In-app         | Medium   |
-| `BUDGET_EXCEED_WARNING`     | Budget exceeded    | In-app         | High     |
-| `PROJECT_STATUS_TRANSITION` | Status change      | In-app         | Low      |
+| Event Type                       | Trigger                                                              | Channel        | Priority  |
+| -------------------------------- | -------------------------------------------------------------------- | -------------- | --------- |
+| `ALLOCATION_SUBMITTED`           | PM creates an allocation with `PENDING` status                       | In-app + Email | High      |
+| `ALLOCATION_APPROVED`            | POD Manager approves allocation (status → `APPROVED`)                | In-app         | Medium    |
+| `ALLOCATION_REJECTED`            | POD Manager rejects allocation (status → `REJECTED`)                 | In-app + Email | High      |
+| `BUDGET_EXCEED_WARNING`          | Project burn rate ≥ budget threshold (configurable, default 80%)     | In-app         | High      |
+| `PROJECT_STATUS_TRANSITION`      | Project status changes (DRAFT → ACTIVE, ACTIVE → COMPLETED, etc.)    | In-app         | Low       |
+| `AUTO_ALLOCATION_FAILED`         | Auto-allocation engine could not satisfy constraint (5-project cap, no availability) | In-app         | Medium    |
+| `AUTO_ALLOCATION_SUCCEEDED`      | Auto-allocation engine successfully assigned resource               | In-app         | Low       |
+| `PROJECT_VERSION_MAJOR`          | Major version change detected on critical task                       | In-app + Email | High      |
+| `HOLIDAY_CALENDAR_UPDATED`       | Admin adds/updates regional holiday affecting capacity calculation  | In-app         | Low       |
+
+**Default Notification Distribution Rules:**
+
+| Event Type               | Recipient(s)                                  | Email?      |
+| ------------------------ | --------------------------------------------- | ----------- |
+| ALLOCATION_SUBMITTED     | Assigned POD Manager                          | ✅ Yes      |
+| ALLOCATION_APPROVED      | Submitting Project Manager + Resource         | ✅ Yes      |
+| ALLOCATION_REJECTED      | Submitting Project Manager + Resource         | ✅ Yes      |
+| BUDGET_EXCEED_WARNING    | Project Owner + Finance Lead                  | ✅ Yes      |
+| PROJECT_STATUS_TRANSITION| Project Team (all assigned PMs and Resources) | ❌ In-app only |
+| AUTO_ALLOCATION_FAILED   | POD Manager + System Admin                    | ✅ Yes      |
+| AUTO_ALLOCATION_SUCCEEDED| POD Manager                                   | ❌ In-app only | 
+| PROJECT_VERSION_MAJOR    | All stakeholders (PM, POD, Architect)         | ✅ Yes      |
+| HOLIDAY_CALENDAR_UPDATED | All POD Managers                              | ❌ In-app only |
+
+**Email Template Variables:** `{project_name}`, `{resource_name}`, `{allocated_hours}`, `{week_start_date}`, `{approver_name}`, `{rejection_reason}`, `{triggering_field}`, `{old_value}`, `{new_value}`.
+
+**Grouping Logic (in-app notifications):**
+- Allocations submitted/rejected in same 24h window → grouped into a single notification e.g., "3 allocation updates require your attention"
+- Budget warnings aggregated per project (no spam if 5x warnings within 24h)
+
+### 14.2 Notification Center UI Specification
+
+The Notification Center implementation is specified in Section 19.6.
 
 Notifications stored in `notifications` table, partitioned by month.
 
@@ -1669,12 +2485,24 @@ services:
 jobs:
   test:
     runs-on: ubuntu-latest
-    services: [postgres, redis]
+    services:
+      postgres:
+        image: postgres:15
+        env: { POSTGRES_PASSWORD: test, POSTGRES_DB: pod_test }
+      redis:
+        image: redis:7-alpine
     steps:
-      - uses: actions/setup-python@v4
-        with: { python-version: '3.11' }
-      - run: pip install -e .[dev]
-      - run: pytest --cov=app --cov-report=xml
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+      - name: Run unit & integration tests
+        run: mvn -B test
+      - name: Generate coverage report
+        run: mvn -B jacoco:report
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
 ```
 
 ### 15.3 Kubernetes Production
@@ -1724,7 +2552,7 @@ livenessProbe: { httpGet: { path: /health/live, port: 8080 } }
 
 - **Concurrent users:** Support 500 active sessions
 - **Data growth:** Design for 10k resources, 500 active projects, 50k allocations/month
-- **Horizontal scaling:** FastAPI app behind load balancer (stateless), DB connection pool (20-50 connections)
+- **Horizontal scaling:** Spring Boot app behind load balancer (stateless), DB connection pool (HikariCP 20-50 connections)
 - **Cache sizing:** Redis with 4GB memory (rate cache ~100MB, session store ~50MB)
 
 ### 15.4 Security
@@ -1781,7 +2609,7 @@ When introducing v2:
 
 | Sprint | Goal                                                        |
 | ------ | ----------------------------------------------------------- |
-| 1      | Foundation: project setup, domain model, Alembic baseline   |
+| 1      | Foundation: project setup, domain model, Flyway migrations  |
 | 2      | Resource APIs: CRUD + CSV import                            |
 | 3      | Project & Activity: CRUD + cycle detection + Gantt          |
 | 4      | Allocation Engine: submit + constraints + approval workflow |
@@ -2033,6 +2861,28 @@ GET /api/v1/dashboard/supply-demand?
 
 **Bulk actions:** Import CSV (Admin), Export CSV, Batch status change.
 
+**CSV Import Flow (Admin-only):**
+
+1. **Upload step** — Click "Import CSV" → choose file → file shows in dropdown
+2. **Preview step** — System parses header + first 10 rows, displays column mapping UI:
+   ```
+   CSV Column            →  Mapped Field
+   ──────────────────────────────────────────
+   external_id           →  ✓ External ID
+   name                  →  ✓ Name
+   cost_center_id        →  ✓ Cost Center
+   billable_team_code    →  ✓ Team Code
+   category              →  ? Category (dropdown: contractor/permanent)
+   skill                 →  ◯ Skill (unmapped — optional)
+   ```
+3. **Import mode selector** — Radio buttons (default: `PREVIEW`):
+   - `PREVIEW` — Read-only parse; shows "X records would be imported, Y skipped, Z errors"
+   - `CONFIRM` — Actual write; requires Admin password re-auth
+   - `DRY_RUN` — Simulates full import, rolls back transaction, returns statistics only
+4. **Confirm step** — If `CONFIRM` mode selected: Admin enters password → `POST /api/v1/resources/import/csv?mode=CONFIRM` → `import_batch_id` UUID generated → rows inserted in single transaction, errors recorded but don't block entire batch → success toast "142 imported, 3 skipped (see error log)"
+
+**`import_batch_id` tracking:** Every successful import generates a UUID used for idempotency. Re-submitting same CSV with same UUID is a no-op with HTTP 200 + message "already processed". Admin can view import history table (Admin Console) listing `import_batch_id`, `row_count`, `success_count`, `error_count`, `imported_by`, `imported_at`.
+
 #### Resource Detail (`/resources/:id`)
 
 **Tabs:** Overview (profile, rate, capacity summary), Allocation Calendar (weekly grid), History (audit entries).
@@ -2080,6 +2930,310 @@ Shared by both project-centric and resource-centric flows:
 #### Allocation Approval Panel (`/allocations/approvals`)
 
 Table showing pending allocations with Resource, Project, Week Range, Hours, Submitted At. Bulk approve/reject. Reject requires reason.
+
+---
+
+### 19.5 Notification Center Page (`/notifications`)
+
+**Route:** `/notifications` — accessible to all authenticated users.
+
+**Layout (`NotificationCenter.tsx`):**
+
+| Region               | Content                                                                 |
+| -------------------- | ----------------------------------------------------------------------- |
+| Header               | "Notifications" title + badge count + Mark All Read button             |
+| Filter toolbar       | Filter by: `read` / `unread` / `all` (default: unread). Clear filters  |
+| Group toggle (ON)    | "Group by event type" checkbox — ON by default                         |
+| Notification list    | Virtual-scroll list (`react-window`); each item: icon + headline + body + timestamp + Mark Read button |
+| Empty state          | "No notifications — you're all caught up!" (when filtered list empty)  |
+
+**Notification Item Render:**
+
+```typescript
+// frontend/src/components/NotificationCenter.tsx
+interface NotificationItemProps {
+  notification: NotificationDTO;  // { id, eventType, title, body, createdAt, read, entityRef }
+}
+
+const NotificationItem = ({ notification }: NotificationItemProps) => {
+  const iconMap = {
+    ALLOCATION_SUBMITTED: '📤',
+    ALLOCATION_APPROVED:  '✅',
+    ALLOCATION_REJECTED:  '❌',
+    BUDGET_EXCEED_WARNING: '⚠️',
+    PROJECT_STATUS_TRANSITION: '🔄',
+    AUTO_ALLOCATION_FAILED: '🤖',
+    AUTO_ALLOCATION_SUCCEEDED: '✨',
+    PROJECT_VERSION_MAJOR: '📌',
+    HOLIDAY_CALENDAR_UPDATED: '📅',
+  };
+
+  return (
+    <div className={`notif-item ${notification.read ? 'read' : 'unread'}`}>
+      <span className="notif-icon">{iconMap[notification.eventType]}</span>
+      <div className="notif-content">
+        <div className="notif-title">{notification.title}</div>
+        <div className="notif-body">{notification.body}</div>
+        <div className="notif-meta">
+          {formatRelativeTime(notification.createdAt)} · {notification.entityRef ? 'View details →' : ''}
+        </div>
+      </div>
+      {!notification.read && (
+        <button onClick={() => markAsRead(notification.id)} aria-label="Mark as read">×</button>
+      )}
+    </div>
+  );
+};
+```
+
+**API Contract (`NotificationDTO`):**
+
+```typescript
+type NotificationDTO = {
+  id: string;
+  eventType: string;           // e.g., 'ALLOCATION_SUBMITTED'
+  title: string;               // e.g., 'Allocation submitted for approval'
+  body: string;                // e.g., 'Sarah Johnson submitted 40 hours for Phoenix (Week of Apr 7)'
+  createdAt: string;           // ISO 8601
+  read: boolean;
+  entityRef?: {               // Optional link to related entity
+    type: 'allocation' | 'project' | 'resource';
+    id: string;
+  } | null;
+};
+```
+
+**Mark-as-Read Flow:**
+
+1. Single item click "×" → `PATCH /api/v1/notifications/{id}/read` with `{ read: true }`
+2. Bulk "Mark all read" (checkbox + button) → `PATCH /api/v1/notifications/bulk-read` body: `{ ids: string[], read: boolean } = true`
+3. Unread badge updated via WebSocket event `NOTIFICATION_READ` (see Section 14.2 real-time)
+
+**WebSocket Push Model (Real-time):**
+
+| Event                            | Payload                                      | Client Action                               |
+| -------------------------------- | -------------------------------------------- | ------------------------------------------- |
+| `NOTIFICATION_CREATED`          | `{ id, eventType, title, body, createdAt }`  | Prepend to list (or add to grouped bucket)  |
+| `NOTIFICATION_READ`            | `{ id, read: true }`                         | Remove from unread count; strikethrough UI  |
+| `NOTIFICATION_BATCH`           | `{ notifications: [...] }`                   | Initial page load or pull-to-refresh result |
+
+**Grouping UI Spec:**
+
+Grouping is enabled by default. Group definition criteria:
+1. Same `eventType`
+2. `createdAt` truncated to the same hour (e.g., 2025-04-19 14:00–14:59)
+
+Within each group:
+- Most recent notification's `title` + `body` shown as group header
+- Collapsed by default (max 5 items visible, "Show N more" expands)
+- Group-level "Mark all read" action applies to all items in bucket
+
+API unchanged — grouping is client-side only. Responses arrive unsorted; client performs `Array.groupBy()` equivalent.
+
+**End-to-end Mockup (visual reference for frontend devs):**
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ Notifications (12)                                   [ Mark All Read ]  [o] Group by type
+├─────────────────────────────────────────────────────────────────┤
+│ [📤] Allocation submitted for approval                          unread
+│     Sarah Johnson submitted 40 hours for Phoenix (Wk Apr 7)    2m ago
+│                                                                  [×]
+├─────────────────────────────────────────────────────────────────┤
+│ [📤] Allocation submitted for approval                          unread  (grouped)
+│     Mike Chen submitted 32 hours for Mercury (Wk Apr 7)         5m ago
+│     + 2 more                                                     [Mark group read]
+├─────────────────────────────────────────────────────────────────┤
+│ [⚠️] Budget warning: Phoenix at 82% utilization                 unread
+│     Allocated $81K of $98.5K budget                             1h ago   [×]
+└─────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+### 19.6 Notification Grouping Toggle Component
+
+**File location:** `frontend/src/components/NotificationGroupingToggle.tsx`
+
+```typescript
+// NotificationGroupingToggle.tsx
+import { useStorage } from '@plasmohq/storage'; // or Zustand store
+
+export const NotificationGroupingToggle = () => {
+  const [groupingEnabled, setGroupingEnabled] = useStorage<boolean>(
+    'notification-grouping-enabled',
+    { defaultValue: true }
+  );
+
+  return (
+    <label className="notification-grouping-toggle">
+      <input
+        type="checkbox"
+        checked={groupingEnabled}
+        onChange={(e) => setGroupingEnabled(e.target.checked)}
+      />
+      Group by event type
+      <Tooltip content="When enabled, notifications of the same type from the last hour are grouped together">
+        <InfoIcon size={14} />
+      </Tooltip>
+    </label>
+  );
+};
+```
+
+**State persistence:** User preference persisted to `localStorage` key `notification-grouping-enabled` (default: `true`). Toggle applies immediately to current list via re-aggregation.
+
+---
+
+### 19.5 Notification Center Page (`/notifications`)
+
+**Route:** `/notifications` — accessible to all authenticated users.
+
+**Layout (`NotificationCenter.tsx`):**
+
+| Region               | Content                                                                 |
+| -------------------- | ----------------------------------------------------------------------- |
+| Header               | "Notifications" title + badge count + Mark All Read button             |
+| Filter toolbar       | Filter by: `read` / `unread` / `all` (default: unread). Clear filters  |
+| Group toggle (ON)    | "Group by event type" checkbox — ON by default                         |
+| Notification list    | Virtual-scroll list (`react-window`); each item: icon + headline + body + timestamp + Mark Read button |
+| Empty state          | "No notifications — you're all caught up!" (when filtered list empty)  |
+
+**Notification Item Render:**
+
+```typescript
+// frontend/src/components/NotificationCenter.tsx
+interface NotificationItemProps {
+  notification: NotificationDTO;  // { id, eventType, title, body, createdAt, read, entityRef }
+}
+
+const NotificationItem = ({ notification }: NotificationItemProps) => {
+  const iconMap = {
+    ALLOCATION_SUBMITTED: '📤',
+    ALLOCATION_APPROVED:  '✅',
+    ALLOCATION_REJECTED:  '❌',
+    BUDGET_EXCEED_WARNING: '⚠️',
+    PROJECT_STATUS_TRANSITION: '🔄',
+    AUTO_ALLOCATION_FAILED: '🤖',
+    AUTO_ALLOCATION_SUCCEEDED: '✨',
+    PROJECT_VERSION_MAJOR: '📌',
+    HOLIDAY_CALENDAR_UPDATED: '📅',
+  };
+
+  return (
+    <div className={`notif-item ${notification.read ? 'read' : 'unread'}`}>
+      <span className="notif-icon">{iconMap[notification.eventType]}</span>
+      <div className="notif-content">
+        <div className="notif-title">{notification.title}</div>
+        <div className="notif-body">{notification.body}</div>
+        <div className="notif-meta">
+          {formatRelativeTime(notification.createdAt)} · {notification.entityRef ? 'View details →' : ''}
+        </div>
+      </div>
+      {!notification.read && (
+        <button onClick={() => markAsRead(notification.id)} aria-label="Mark as read">×</button>
+      )}
+    </div>
+  );
+};
+```
+
+**API Contract (`NotificationDTO`):**
+
+```typescript
+type NotificationDTO = {
+  id: string;
+  eventType: string;           // e.g., 'ALLOCATION_SUBMITTED'
+  title: string;               // e.g., 'Allocation submitted for approval'
+  body: string;                // e.g., 'Sarah Johnson submitted 40 hours for Phoenix (Week of Apr 7)'
+  createdAt: string;           // ISO 8601
+  read: boolean;
+  entityRef?: {               // Optional link to related entity
+    type: 'allocation' | 'project' | 'resource';
+    id: string;
+  } | null;
+};
+```
+
+**Mark-as-Read Flow:**
+
+1. Single item click "×" → `PATCH /api/v1/notifications/{id}/read` with `{ read: true }`
+2. Bulk "Mark all read" (checkbox + button) → `PATCH /api/v1/notifications/bulk-read` body: `{ ids: string[], read: boolean } = true`
+3. Unread badge updated via WebSocket event `NOTIFICATION_READ` (see Section 14.2 real-time)
+
+**WebSocket Push Model (Real-time):**
+
+| Event                            | Payload                                      | Client Action                               |
+| -------------------------------- | -------------------------------------------- | ------------------------------------------- |
+| `NOTIFICATION_CREATED`          | `{ id, eventType, title, body, createdAt }`  | Prepend to list (or add to grouped bucket)  |
+| `NOTIFICATION_READ`            | `{ id, read: true }`                         | Remove from unread count; strikethrough UI  |
+| `NOTIFICATION_BATCH`           | `{ notifications: [...] }`                   | Initial page load or pull-to-refresh result |
+
+**Grouping UI Spec:**
+
+Grouping is enabled by default. Group definition criteria:
+1. Same `eventType`
+2. `createdAt` truncated to the same hour (e.g., 2025-04-19 14:00–14:59)
+
+Within each group:
+- Most recent notification's `title` + `body` shown as group header
+- Collapsed by default (max 5 items visible, "Show N more" expands)
+- Group-level "Mark all read" action applies to all items in bucket
+
+API unchanged — grouping is client-side only. Responses arrive unsorted; client performs `Array.groupBy()` equivalent.
+
+**End-to-end Mockup (visual reference for frontend devs):**
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ Notifications (12)                                   [ Mark All Read ]  [o] Group by type
+├─────────────────────────────────────────────────────────────────┤
+│ [📤] Allocation submitted for approval                          unread
+│     Sarah Johnson submitted 40 hours for Phoenix (Wk Apr 7)    2m ago
+│                                                                  [×]
+├─────────────────────────────────────────────────────────────────┤
+│ [📤] Allocation submitted for approval                          unread  (grouped)
+│     Mike Chen submitted 32 hours for Mercury (Wk Apr 7)         5m ago
+│     + 2 more                                                     [Mark group read]
+├─────────────────────────────────────────────────────────────────┤
+│ [⚠️] Budget warning: Phoenix at 82% utilization                 unread
+│     Allocated $81K of $98.5K budget                             1h ago   [×]
+└─────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+### 19.6 Notification Grouping Toggle Component
+
+**File location:** `frontend/src/components/NotificationGroupingToggle.tsx`
+
+```typescript
+// NotificationGroupingToggle.tsx
+import { useStorage } from '@plasmohq/storage'; // or Zustand store
+
+export const NotificationGroupingToggle = () => {
+  const [groupingEnabled, setGroupingEnabled] = useStorage<boolean>(
+    'notification-grouping-enabled',
+    { defaultValue: true }
+  );
+
+  return (
+    <label className="notification-grouping-toggle">
+      <input
+        type="checkbox"
+        checked={groupingEnabled}
+        onChange={(e) => setGroupingEnabled(e.target.checked)}
+      />
+      Group by event type
+      <Tooltip content="When enabled, notifications of the same type from the last hour are grouped together">
+        <InfoIcon size={14} />
+      </Tooltip>
+    </label>
+  );
+};
+```
+
+**State persistence:** User preference persisted to `localStorage` key `notification-grouping-enabled` (default: `true`). Toggle applies immediately to current list via re-aggregation.
 
 ---
 
@@ -2319,74 +3473,174 @@ The system applies **multi-tiered limits** (IP + authenticated identity) with **
 
 | Tier     | Scope                  | Rate        | Burst | Enforcement Point  | Example                      |
 | -------- | ---------------------- | ----------- | ----- | ------------------ | ---------------------------- |
-| Default  | Anonymous IP           | 100 req/min | 120   | FastAPI middleware | `/api/v1/public/*`         |
-| Standard | Authenticated user     | 500 req/min | 600   | FastAPI middleware | `/api/v1/resources`        |
-| Heavy    | Auto-allocate endpoint | 10 req/min  | 15    | FastAPI middleware | `/api/v1/allocations/auto` |
-| Strict   | Login endpoint         | 5 req/min   | 5     | FastAPI middleware | `/api/v1/auth/login`       |
+| Default  | Anonymous IP           | 100 req/min | 120   | Spring Filter     | `/api/v1/public/*`         |
+| Standard | Authenticated user     | 500 req/min | 600   | Spring Filter     | `/api/v1/resources`        |
+| Heavy    | Auto-allocate endpoint | 10 req/min  | 15    | Spring Filter     | `/api/v1/allocations/auto` |
+| Strict   | Login endpoint         | 5 req/min   | 5     | Spring Filter     | `/api/v1/auth/login`       |
 
-**Production systems should use the distributed sliding window implementation (26.3).**
+**Production systems should use the distributed sliding window implementation (Spring RedisRateLimiter).**
 
 #### 28.2.2 Implementation
 
-**Backend (FastAPI Middleware)**
+**Backend (Spring Boot Filter)**
 
-```python
-# backend/app/middleware/rate_limit.py
-from fastapi import Request, HTTPException
-from starlette.status import HTTP_429_TOO_MANY_REQUESTS
-from slowapi import Limiter, _rate_limit_exceeded_handler
-from slowapi.util import get_remote_address
+```java
+// backend/src/main/java/com/pod/filter/RateLimitFilter.java
+@Component
+@Order(Ordered.HIGHEST_PRECEDENCE + 1)
+@RequiredArgsConstructor
+public class RateLimitFilter extends OncePerRequestFilter {
 
-# Configure limiter per-endpoint
-limiter = Limiter(key_func=get_remote_address, strategy="fixed-window")
+    private final RedisTemplate<String, String> redisTemplate;
+    private final TokenBucketService tokenBucketService;
 
-app.state.limiter = limiter
-app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+    @Override
+    protected void doFilterInternal(HttpServletRequest request,
+                                    HttpServletResponse response,
+                                    FilterChain filterChain) throws ServletException, IOException {
 
-@app.get("/api/v1/resources")
-@limiter.limit("100/minute")
-async def list_resources(request: Request):
-    ...
+        String path = request.getRequestURI();
+        String identifier = resolveIdentifier(request);
+        RateLimitConfig config = RateLimitConfig.forPath(path);
 
-@app.post("/api/v1/allocations/auto")
-@limiter.limit("10/minute")
-async def auto_allocate(request: Request):
-    ...
+        boolean allowed = tokenBucketService.tryConsume(
+            identifier, config.getPath(), config.getCapacity(), config.getRefillRate());
+
+        if (!allowed) {
+            response.setStatus(HttpStatus.TOO_MANY_REQUESTS.value());
+            response.setHeader("Retry-After", String.valueOf(config.getRetryAfterSeconds()));
+            response.getWriter().write("{\"error\":{\"code\":\"RATE_LIMIT_EXCEEDED\"}}");
+            return;
+        }
+
+        filterChain.doFilter(request, response);
+    }
+
+    private String resolveIdentifier(HttpServletRequest request) {
+        // Extract from JWT token if authenticated, else use IP
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth != null && auth.getPrincipal() instanceof Jwt jwt) {
+            return "user:" + jwt.getSubject();
+        }
+        return "ip:" + request.getRemoteAddr();
+    }
+}
+
+// TokenBucketService.java
+@Service
+@RequiredArgsConstructor
+public class TokenBucketService {
+    private final RedisTemplate<String, String> redisTemplate;
+
+    // Redis Lua script for atomic token bucket refill + consume
+    private static final String LUA_SCRIPT = """
+        local tokens = tonumber(redis.call('GET', KEYS[1])) or ARGV[1]
+        local lastRefill = tonumber(redis.call('GET', KEYS[2])) or 0
+        local now = tonumber(ARGV[3])
+        local refillRate = tonumber(ARGV[4])
+        local limit = tonumber(ARGV[5])
+
+        tokens = tokens + math.floor((now - lastRefill) * refillRate)
+        if tokens > limit then tokens = limit end
+
+        if tokens >= 1 then
+            tokens = tokens - 1
+            redis.call('SET', KEYS[1], tokens)
+            redis.call('SET', KEYS[2], now)
+            return 1
+        else
+            redis.call('SET', KEYS[1], tokens)
+            return 0
+        end
+        """;
+
+    public boolean tryConsume(String identifier, String path, int capacity, double refillRatePerMs) {
+        String keyTokens = String.format("rl:tokens:%s:%s", path, identifier);
+        String keyLastRefill = String.format("rl:last:%s:%s", path, identifier);
+        long now = System.currentTimeMillis();
+
+        Long result = redisTemplate.execute(
+            new DefaultRedisScript<>(LUA_SCRIPT, Long.class),
+            List.of(keyTokens, keyLastRefill),
+            String.valueOf(capacity), String.valueOf(now),
+            String.valueOf(refillRatePerMs), String.valueOf(capacity)
+        );
+        return result != null && result == 1L;
+    }
+}
+```
+
+**RateLimitConfig.java — endpoint-to-config mapping:**
+```java
+@Component
+@ConfigurationProperties(prefix = "app.rate-limits")
+@Data
+public class RateLimitConfig {
+    private Map<String, LimitConfig> endpoints = new HashMap<>();
+
+    public static RateLimitConfig forPath(String path) {
+        // Pattern match: /api/v1/resources → Standard tier
+        if (path.startsWith("/api/v1/public/")) return RateLimitConfig.DEFAULT;
+        if (path.startsWith("/api/v1/resources")) return RateLimitConfig.STANDARD;
+        if (path.startsWith("/api/v1/allocations/auto")) return RateLimitConfig.HEAVY;
+        if (path.equals("/api/v1/auth/login")) return RateLimitConfig.STRICT;
+        return RateLimitConfig.DEFAULT;
+    }
+
+    public static final RateLimitConfig DEFAULT =
+        new RateLimitConfig(100, 120, 60);
+    public static final RateLimitConfig STANDARD =
+        new RateLimitConfig(500, 600, 60);
+    public static final RateLimitConfig HEAVY =
+        new RateLimitConfig(10, 15, 60);
+    public static final RateLimitConfig STRICT =
+        new RateLimitConfig(5, 5, 60);
+}
 ```
 
 **Distributed Rate Limiting (Multi-Replica)**
 
-Single-replica approach fails in multi-pod Kubernetes deployments. Use Redis-based distributed limiter:
+Spring Boot 3.2 with Spring Security provides `ReactiveRedisTokenBucket` for distributed sliding-window rate limiting across Kubernetes replicas. Use Redis sorted sets for sliding-window:
 
-```python
-# backend/app/middleware/distributed_rate_limit.py
-from redis import Redis
-from fastapi import Request, HTTPException
+```java
+// SlidingWindowRateLimiter.java
+@Service
+@RequiredArgsConstructor
+public class SlidingWindowRateLimiter {
+    private final RedisTemplate<String, String> redisTemplate;
 
-redis_client = Redis(host=os.getenv("REDIS_HOST"), port=6379, db=1)
+    public boolean allow(String identifier, int limit, Duration window) {
+        String key = "rl:sw:" + identifier;
+        long now = System.currentTimeMillis();
+        long cutoff = now - window.toMillis();
 
-async def check_rate_limit(request: Request, limit: int, window_seconds: int):
-    """
-    Sliding window rate limit using Redis sorted set.
-    Keys: user_id or IP
-    Members: request timestamps (score = timestamp)
-    """
-    identifier = get_identifier(request)
-    now = int(time.time())
-    window_start = now - window_seconds
+        // Lua script: atomic trim + count + add
+        String script = """
+            local cutoff = tonumber(ARGV[1])
+            local now = tonumber(ARGV[2])
+            local limit = tonumber(ARGV[3])
 
-    # Trim old entries
-    redis_client.zremrangebyscore(f"rl:{identifier}", 0, window_start)
-  
-    # Count current window size
-    current = redis_client.zcard(f"rl:{identifier}")
-  
-    if current >= limit:
-        raise HTTPException(429, "Rate limit exceeded")
+            redis.call('ZREMRANGEBYSCORE', KEYS[1], 0, cutoff)
+            local count = redis.call('ZCARD', KEYS[1])
 
-    # Add current request
-    redis_client.zadd(f"rl:{identifier}", {str(now): now})
-    redis_client.expire(f"rl:{identifier}", window_seconds * 2)
+            if count < limit then
+                redis.call('ZADD', KEYS[1], now, tostring(now) .. ':' .. math.random())
+                redis.call('EXPIRE', KEYS[1], ARGV[4])
+                return 1
+            else
+                return 0
+            end
+            """;
+
+        Long result = redisTemplate.execute(
+            new DefaultRedisScript<>(script, Long.class),
+            List.of(key),
+            String.valueOf(cutoff), String.valueOf(now), String.valueOf(limit),
+            String.valueOf(window.toSeconds() * 2)
+        );
+        return result != null && result == 1L;
+    }
+}
 ```
 
 **Frontend Handling**
@@ -2490,7 +3744,7 @@ Runbook:
    - If deployed <30min ago: suspect code change → rollback to previous: `kubectl rollout undo ...`
 4. Check exception logs: `journalctl -u pod-backend -n 200 | grep -i "exception\|traceback"`
 5. Check DB connectivity: `kubectl exec pod/pod-backend-xxxx -- pg_isready -h $DATABASE_URL`
-6. If DB connection pool exhausted: increase `SQLALCHEMY_POOL_SIZE` in config map, restart pods.
+6. If DB connection pool exhausted: increase `SPRING_DATASOURCE_HIKARI_MAXIMUM-POOL-SIZE` in config map, restart pods.
 7. Escalate to DBA if database-related errors (constraint violations, deadlocks).
 
 **Alert: `PostgreSQLDown` — P0**
@@ -2542,7 +3796,8 @@ Runbook:
 1. Check scheduler health: `kubectl logs deployment/mv-refresh-scheduler -n prod`
 2. Check Redis lock status: `redis-cli GET lock:refresh_mv`
    - If lock held >300s: another instance stuck; kill stale lock only if no active refresh running.
-3. Manually trigger refresh: `kubectl exec -it pod/pod-backend-xxxx -- python -m app.workers.refresh_views`
+3. Manually trigger refresh: `kubectl exec -it pod/pod-backend-xxxx -- 
+   java -cp /app/lib/*:/app/app.jar com.pod.task.MaterializedViewRefreshTask`
 4. If scheduler pod crashed: `kubectl rollout restart deployment/mv-refresh-scheduler`
 
 **Alert: `AllocationConstraintViolationHigh` — P2**
@@ -2605,6 +3860,50 @@ Drop partitions >8yr old (after S3 archive export confirmed):
 DROP TABLE audit_log_201801;
 ```
 
+#### 29.2.4 Partition Automation (Cron + Liquibase Flyway)
+
+**Partition creation:** Backend application includes `PartitionMaintenanceTask` that runs at 00:05 UTC on the 1st of each month to create the next month's partition:
+
+```java
+// backend/src/main/java/com/pod/task/PartitionMaintenanceTask.java
+@Component
+@Slf4j
+@RequiredArgsConstructor
+public class PartitionMaintenanceTask {
+
+    private final JdbcTemplate jdbcTemplate;
+
+    // Run 5 min after midnight on the 1st of each month
+    @Scheduled(cron = "0 5 0 1 * ?")
+    public void createNextMonthPartition() {
+        YearMonth nextMonth = YearMonth.now().plusMonths(1);
+        String partitionName = "audit_log_" + nextMonth.format(DateTimeFormatter.ofPattern("yyyyMM"));
+        String from = nextMonth.atDay(1).toString();
+        String to = nextMonth.plusMonths(1).atDay(1).toString();
+
+        String sql = String.format(
+            "CREATE TABLE IF NOT EXISTS %s PARTITION OF audit_log " +
+            "FOR VALUES FROM ('%s') TO ('%s')",
+            partitionName, from, to);
+
+        jdbcTemplate.execute(sql);
+        log.info("Created audit_log partition {}", partitionName);
+    }
+
+    // Run weekly: find partitions >8yr old where S3 archive confirmed, then DROP
+    @Scheduled(cron = "0 0 2 ? * SUN")  // Sunday 02:00 UTC
+    public void dropExpiredPartitions() {
+        // Query table list: SELECT tablename FROM pg_tables WHERE tablename LIKE 'audit_log_%'
+        // For each: extract year-month, compare to cutoff = now() - 8 years
+        // Verify S3 archive exists (head_object S3 key audit_log/YYYY/MM/log.jsonl.gz)
+        // If confirmed: DROP TABLE tablename
+        // Else: log warning "Archive missing for {partition} — retention extended"
+    }
+}
+```
+
+**Migration tooling:** Use Flyway or Liquibase to define the base `audit_log` parent table with `PARTITION BY RANGE (created_at)`. Partition DDL is executed dynamically by the maintenance task; no versioned migration needed for each month.
+
 ### 29.3 Backup & Restore
 
 #### 27.3.1 Backup Schedule
@@ -2655,7 +3954,25 @@ SELECT pg_create_physical_replication_slot('replica_slot_1');
 -- On replica: set primary_conninfo = 'host=<primary_ip> port=5432 user=replicator password=... slot=replica_slot_1'
 ```
 
-Update application: Direct read-only queries (`SELECT ...`) to replica via read-replica connection pool (SQLAlchemy `replica` bind).
+Update application: Direct read-only queries (`SELECT ...`) to replica via Spring's `AbstractRoutingDataSource` or separate `JdbcTemplate`/`EntityManager` configured for read-replica:
+
+```java
+// ReadReplicaRoutingDataSource.java
+@Component
+public class ReadReplicaRoutingDataSource extends AbstractRoutingDataSource {
+    @Override
+    protected Object determineCurrentLookupKey() {
+        return ReadOnlyModeContext.isReadOnly() ? "replica" : "primary";
+    }
+}
+
+// Usage in DashboardService:
+@Transactional(readOnly = true)
+public DashboardDto getMonthlyMetrics(YearMonth month) {
+    // Query routed automatically to replica via routing datasource
+    return jdbcTemplate.queryForObject(...);
+}
+```
 
 #### 27.4.3 Redis Cluster Scaling
 
@@ -2717,8 +4034,122 @@ Backend code change: Enable cluster mode (`Redis.from_url(..., decode_responses=
 
 - [ ] Run DB consistency check: `SELECT COUNT(*) FROM allocations a JOIN resources r ON a.resource_id = r.id WHERE r.is_active = false AND a.is_active = true;`
 - [ ] Rotate secrets: `kubectl create secret generic pod-secrets --from-file=...`
-- [ ] Security patch roll-out (OS, Python, Node)
+- [ ] Security patch roll-out (OS, Java, Node)
 - [ ] Load test staging (using Locust): simulate 500 concurrent users
 - [ ] Incident post-mortem review (any P0/P1 in last month)
+
+---
+
+## Change Log
+
+| Version | Date       | Author   | Changes                                                                 |
+| ------- | ---------- | -------- | ----------------------------------------------------------------------- |
+| v2.2    | 2026-04-19 | Claude   | TDD v2.1 remediation complete: 5 P0 critical gaps fixed + 5 polish     |
+|         |            |          | 1. Added 3 missing MVs (`mv_utilization_monthly`, `mv_overplan_conflicts`, `mv_cash_flow_forecast`) to Section 9.1; updated refresh task to include all 5 views in batch |
+|         |            |          | 2. Expanded Notification Section 14 event matrix from 4→9 events; added distribution rules, email template variables, grouping logic |
+|         |            |          | 3. Fixed `resources` table: added explicit `is_billable` column separate from `is_active`; added column semantics blueprint |
+|         |            |          | 4. Fixed `rates` table: added `is_billable` column; defined its separation from `is_active` |
+|         |            |          | 5. Added concrete Java method signatures for `ResourceService.changeStatus()` and `ProjectService.transitionToTerminal()`, including repository `@Modifying` queries |
+|         |            |          | 6. Added `RATE_GAP_DETECTED` error code to new Appendix A error matrix |
+|         |            |          | 7. Added Section 5.2.1: LATERAL join SQL implementation for `/export/resources` endpoint, including CSV column mapping and gap-handling semantics |
+|         |            |          | 8. Added Section 19.5: Notification Center page full UX spec (header, filter, grouping toggle, item render, WebSocket push model, mockup) |
+|         |            |          | 9. Added Section 19.6: Notification Grouping Toggle component spec with storage persistence |
+|         |            |          | 10. Added Appendix B for Notification Center; added Section 29.2.4 for audit partition automation task |
+| v2.1    | 2026-04-18 | Claude   | TDD v2.0 validated against 15 dependency gaps: fixed 3x duplicate sections, renamed FK columns (holidays/audit_log/allocations → `{x}_user_id`), removed false UNIQUE constraint on `resources(cost_center_id,billable_team_code)`, removed allocations four-eyes CHECK, updated schema/user-guide absence flag |
+| v2.0    | 2026-04-17 | Pod Team | Initial TDD draft per TDD_REMEDIATION_PLAN v2.1 input                         |
+
+---
+
+## Change Log
+
+| Version | Date       | Author   | Changes                                                                 |
+| ------- | ---------- | -------- | ----------------------------------------------------------------------- |
+| v2.2    | 2026-04-19 | Claude   | TDD v2.1 remediation complete: 5 P0 critical gaps fixed + 5 polish     |
+|         |            |          | 1. Added 3 missing MVs (`mv_utilization_monthly`, `mv_overplan_conflicts`, `mv_cash_flow_forecast`) to Section 9.1; updated refresh task to include all 5 views in batch |
+|         |            |          | 2. Expanded Notification Section 14 event matrix from 4→9 events; added distribution rules, email template variables, grouping logic |
+|         |            |          | 3. Fixed `resources` table: added explicit `is_billable` column separate from `is_active`; added column semantics blueprint |
+|         |            |          | 4. Fixed `rates` table: added `is_billable` column; defined its separation from `is_active` |
+|         |            |          | 5. Added concrete Java method signatures for `ResourceService.changeStatus()` and `ProjectService.transitionToTerminal()`, including repository `@Modifying` queries |
+|         |            |          | 6. Added `RATE_GAP_DETECTED` error code to new Appendix A error matrix |
+|         |            |          | 7. Added Section 5.2.1: LATERAL join SQL implementation for `/export/resources` endpoint, including CSV column mapping and gap-handling semantics |
+|         |            |          | 8. Added Section 19.5: Notification Center page full UX spec (header, filter, grouping toggle, item render, WebSocket push model, mockup) |
+|         |            |          | 9. Added Section 19.6: Notification Grouping Toggle component spec with storage persistence |
+|         |            |          | 10. Added Appendix B for Notification Center; added Section 29.2.4 for audit partition automation task |
+| v2.1    | 2026-04-18 | Claude   | TDD v2.0 validated against 15 dependency gaps: fixed 3x duplicate sections, renamed FK columns (holidays/audit_log/allocations → `{x}_user_id`), removed false UNIQUE constraint on `resources(cost_center_id,billable_team_code)`, removed allocations four-eyes CHECK, updated schema/user-guide absence flag |
+| v2.0    | 2026-04-17 | Pod Team | Initial TDD draft per TDD_REMEDIATION_PLAN v2.1 input                         |
+
+---
+
+## Appendices
+
+### A. Error Code Matrix
+
+All service layers return structured error responses with a canonical error code. These codes power the frontend error display (toast/alert) and audit log `details->'code'` field.
+
+| Code                         | HTTP Status | Component               | Description                                                                 |
+| ---------------------------- | ----------- | ----------------------- | --------------------------------------------------------------------------- |
+| `ALLOCATION_CONFLICT`        | 409         | Allocation Service      | Optimistic lock version mismatch; concurrent edit detected                 |
+| `DAILY_HOURS_EXCEEDED`      | 400         | ConstraintValidator     | Proposed daily avg > 10h                                                    |
+| `MONTHLY_CAP_EXCEEDED`      | 400         | ConstraintValidator     | Total monthly hours > 144h                                                  |
+| `OT_MONTHLY_CAP`            | 400         | ConstraintValidator     | Monthly OT (total – 144) > 36h                                              |
+| `PROJECT_SPREAD_LIMIT`      | 400         | ConstraintValidator     | Resource already assigned to 5 distinct projects in target month           |
+| `BUDGET_EXCEEDED`           | 400         | BudgetValidator         | Allocated cost > project budget (threshold configurable, default 80% warning) |
+| `RATE_PERIOD_OVERLAP`       | 409         | RateService             | Overlapping effective_from period for (cost_center_id, billable_team_code)  |
+| `RATE_GAP_DETECTED`         | 400         | RateService             | No rate found for cost_center/team/month — rate table has coverage hole    |
+| `UNAUTHORIZED_STATUS_TRANSITION` | 403     | ResourceService / ProjectService | Invalid state machine transition (e.g., terminated → active)               |
+| `PENDING_ALLOCATIONS_EXIST` | 400         | ProjectService          | Cannot close/complete project while PENDING allocations remain            |
+| `CSV_IMPORT_BATCH_DUPLICATE`| 409         | CSV Import Controller   | import_batch_id already processed; idempotent skip                         |
+| `INVALID_IMPORT_MODE`       | 400         | CSV Import Controller   | import_mode not in [`PREVIEW`, `CONFIRM`, `DRY_RUN`]                       |
+| `MATERIALIZED_VIEW_STALE`   | 503         | Scheduler / MVTasks     | Dashboard MV not refreshed within SLA (10 min threshold)                   |
+
+### B. Notification Center Page — Section 19 Expansion
+
+Section 19.6 introduces the NotificationCenter component (NotificationCenter.tsx) and its routing configuration in App.tsx. Key behaviors:
+
+| Behavior                         | Implementation Detail                                                                 |
+| -------------------------------- | ------------------------------------------------------------------------------------- |
+| Pull-to-refresh                  | OnRefresh handler triggers `NotificationService.list({ page, size })` API call       |
+| Grouping toggle (ON by default) | Group by: `eventType` + `(created_at truncated to hour)`; max 5 items per group     |
+| Mark-as-read bulk action         | PATCH `/api/v1/notifications/bulk-read` with `{ ids: [...], read: true }`           |
+| Unread badge                     | Header badge count derived from `NOTIFICATION_BADGE_UNREAD` Redis key (WebSocket push) |
+
+See Section 19.6 for full frontend component specification.
+
+---
+
+## Appendices
+
+### A. Error Code Matrix
+
+All service layers return structured error responses with a canonical error code. These codes power the frontend error display (toast/alert) and audit log `details->'code'` field.
+
+| Code                         | HTTP Status | Component               | Description                                                                 |
+| ---------------------------- | ----------- | ----------------------- | --------------------------------------------------------------------------- |
+| `ALLOCATION_CONFLICT`        | 409         | Allocation Service      | Optimistic lock version mismatch; concurrent edit detected                 |
+| `DAILY_HOURS_EXCEEDED`      | 400         | ConstraintValidator     | Proposed daily avg > 10h                                                    |
+| `MONTHLY_CAP_EXCEEDED`      | 400         | ConstraintValidator     | Total monthly hours > 144h                                                  |
+| `OT_MONTHLY_CAP`            | 400         | ConstraintValidator     | Monthly OT (total – 144) > 36h                                              |
+| `PROJECT_SPREAD_LIMIT`      | 400         | ConstraintValidator     | Resource already assigned to 5 distinct projects in target month           |
+| `BUDGET_EXCEEDED`           | 400         | BudgetValidator         | Allocated cost > project budget (threshold configurable, default 80% warning) |
+| `RATE_PERIOD_OVERLAP`       | 409         | RateService             | Overlapping effective_from period for (cost_center_id, billable_team_code)  |
+| `RATE_GAP_DETECTED`         | 400         | RateService             | No rate found for cost_center/team/month — rate table has coverage hole    |
+| `UNAUTHORIZED_STATUS_TRANSITION` | 403     | ResourceService / ProjectService | Invalid state machine transition (e.g., terminated → active)               |
+| `PENDING_ALLOCATIONS_EXIST` | 400         | ProjectService          | Cannot close/complete project while PENDING allocations remain            |
+| `CSV_IMPORT_BATCH_DUPLICATE`| 409         | CSV Import Controller   | import_batch_id already processed; idempotent skip                         |
+| `INVALID_IMPORT_MODE`       | 400         | CSV Import Controller   | import_mode not in [`PREVIEW`, `CONFIRM`, `DRY_RUN`]                       |
+| `MATERIALIZED_VIEW_STALE`   | 503         | Scheduler / MVTasks     | Dashboard MV not refreshed within SLA (10 min threshold)                   |
+
+### B. Notification Center Page — Section 19 Expansion
+
+Section 19.6 introduces the NotificationCenter component (NotificationCenter.tsx) and its routing configuration in App.tsx. Key behaviors:
+
+| Behavior                         | Implementation Detail                                                                 |
+| -------------------------------- | ------------------------------------------------------------------------------------- |
+| Pull-to-refresh                  | OnRefresh handler triggers `NotificationService.list({ page, size })` API call       |
+| Grouping toggle (ON by default) | Group by: `eventType` + `(created_at truncated to hour)`; max 5 items per group     |
+| Mark-as-read bulk action         | PATCH `/api/v1/notifications/bulk-read` with `{ ids: [...], read: true }`           |
+| Unread badge                     | Header badge count derived from `NOTIFICATION_BADGE_UNREAD` Redis key (WebSocket push) |
+
+See Section 19.6 for full frontend component specification.
 
 ---
