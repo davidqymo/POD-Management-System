@@ -1,0 +1,187 @@
+# POD Team Management System — Progress Log
+
+> **Last Updated:** 2026-04-19
+> **Current Branch:** main
+> **Current Phase:** Phase 2 — Implementation (ready to start)
+
+---
+
+## Current Status
+
+**Phase 1 (Requirements Refinement):** ✅ **COMPLETE**
+**Phase 1.5 (UX Design Deliverables):** ✅ **COMPLETE**
+**Phase 2 (Implementation Planning):** ✅ **COMPLETE**
+**Phase 2.5 (TDD Remediation):** ✅ **COMPLETE** — 15 fixes applied to `doc/TECHNICAL_DESIGN.md` (duplicate removal, section renumbering, FK renames, schema corrections)
+**Phase 3 (Implementation Execution):** 🎯 **READY TO START** — implementation plan at `docs/superpowers/plans/2026-04-19-pod-team-management-phase1.md`
+
+All major decisions documented in `doc/PRODUCT_REQUIREMENTS.md` (v1.5). PRD updated to capture UX decisions from review (Q1–Q5). Technical Design Document (`doc/TECHNICAL_DESIGN.md`) v2.1 remediated and validated. Design now passes dependency checks and is implementation-ready.
+
+---
+
+## Completed Modules (Phase 1)
+
+- [x] **Requirements discovery & clarification** — 27 structured questions answered across data model, process, UX, and technical dimensions
+- [x] **Business Analysis gap review** — 13 gaps identified and integrated (resource lifecycle, project immutability, rejection workflow, notifications, holiday calendar, soft delete, audit viewer)
+- [x] **Solution Architecture review** — 10 technical gaps resolved (concurrency, dashboard aggregation, Gantt library, timezone, audit retention, rate cache, idempotency, partition strategy)
+- [x] **PRD v1.5 finalized** — 16 numbered sections + 5 appendices, 28+ acceptance criteria, all architectural decisions documented with justification
+- [x] **UX Design Deliverables** — UX deliverables complete (user flows, wireframes, Gantt spec, error cheatsheet, notification layout); UX review conducted with 5 decisions captured (Q1–Q5)
+
+## Phase 2.5 — TDD Remediation (v2.1)
+
+**Status:** ✅ COMPLETE
+
+**Issues Fixed (15 total):**
+
+| # | Issue | Fix | Status |
+|---|-------|-----|--------|
+| 1 | resources table: erroneous UNIQUE (cost_center_id, billable_team_code) | Removed false constraint; verified only external_id is unique | ✅ |
+| 2–4 | Duplicate Section 10 (Security & Authorization) | Deleted second copy at line 1490+; kept first full copy | ✅ |
+| 5–7 | Duplicate Section 15 second copy | Renamed "Non-Functional Requirements" to Section 16; cascaded renumber all subsequent sections | ✅ |
+| 8–10 | Duplicate Section 17 second copy (Frontend Pages) | Removed duplicate Appendix C and second Frontend Pages copy; renumbered to Section 19 with cascading renumber | ✅ |
+| 11 | Section/sub-section numbering inconsistencies (26.1–26.x, 27.1–27.x) | Renumbered: Section 26 → 28 (API Rate Limiting), Section 27 → 29 (Operational Runbooks); all sub-sections updated | ✅ |
+| 12 | holidays.created_by FK column naming | Renamed to `created_by_user_id` referencing `users` per Fix #4 Option A | ✅ |
+| 13 | audit_log.changed_by FK column naming | Renamed to `changed_by_user_id` referencing `users` | ✅ |
+| 14 | allocations.approved_by FK column naming | Renamed to `approved_by_user_id` referencing `users` | ✅ |
+| 15 | allocations four-eyes CHECK constraint | Removed DB-level CHECK (deferred to service layer enforcement per Option A) | ✅ |
+
+## Phase 2.5 — TDD Remediation (v2.1)
+
+**Status:** ✅ COMPLETE
+
+**Issues Fixed (15 total):**
+
+| # | Issue | Fix | Status |
+|---|-------|-----|--------|
+| 1 | resources table: erroneous UNIQUE (cost_center_id, billable_team_code) | Removed false constraint; verified only external_id is unique | ✅ |
+| 2–4 | Duplicate Section 10 (Security & Authorization) | Deleted second copy at line 1490+; kept first full copy | ✅ |
+| 5–7 | Duplicate Section 15 second copy | Renamed "Non-Functional Requirements" to Section 16; cascaded renumber all subsequent sections | ✅ |
+| 8–10 | Duplicate Section 17 second copy (Frontend Pages) | Removed duplicate Appendix C and second Frontend Pages copy; renumbered to Section 19 with cascading renumber | ✅ |
+| 11 | Section/sub-section numbering inconsistencies (26.1–26.x, 27.1–27.x) | Renumbered: Section 26 → 28 (API Rate Limiting), Section 27 → 29 (Operational Runbooks); all sub-sections updated | ✅ |
+| 12 | holidays.created_by FK column naming | Renamed to `created_by_user_id` referencing `users` per Fix #4 Option A | ✅ |
+| 13 | audit_log.changed_by FK column naming | Renamed to `changed_by_user_id` referencing `users` | ✅ |
+| 14 | allocations.approved_by FK column naming | Renamed to `approved_by_user_id` referencing `users` | ✅ |
+| 15 | allocations four-eyes CHECK constraint | Removed DB-level CHECK (deferred to service layer enforcement per Option A) | ✅ |
+
+---
+
+## In-Progress Tasks
+
+- [ ] **Implementation Planning** — create detailed task breakdown using `superpowers:writing-plans`
+  - Current Progress: 0% — PRD complete; awaiting plan creation
+  - Blockers: None — ready to proceed
+
+---
+
+## To-Develop & To-Debug (Phase 2)
+
+- **Backend API Layer** — FastAPI + SQLAlchemy models for all 6 core entities (Resource, Rate, CostCenter, Project, Activity, Allocation)
+- **Project Schedule Engine** — M:N dependency graph, cycle detection, critical path calculation, activity template management
+- **Resource Allocation Engine** — availability-based assignment, constraint validation (144h/month, 36h OT, 5-project cap), approval workflow
+- **Auto-Allocation Service** — priority-based automated assignment, conflict resolution, exception reporting
+- **Dashboard Materialized Views** — 5-minute refresh pipeline, supply/demand aggregation, burn rate + variance metrics
+- **CSV Import/Export** — Resource import, Allocation export, Actual Consumption import (Phase 2)
+- **Gantt Visualization** — Frappe Gantt integration, drag-drop with constraint validation, critical path overlay
+- **Audit & Notification** — partitioned audit log, event matrix (9 types), in-app + email for critical events
+- **Admin Console** — holiday calendar management, rate maintenance, resource soft-delete, audit viewer
+
+---
+
+## Key Architectural Decisions
+
+1. **Concurrency:** Optimistic locking (version column + auto-retry) on allocation updates
+2. **Dashboard Performance:** Materialized views refreshed every 5 minutes (no real-time requirement)
+3. **Gantt Library:** Frappe Gantt (MIT) + custom critical path plugin; FS-only dependencies for Phase 1
+4. **Timezone:** Single-region configurable (default Asia/Shanghai); no distributed TZ complexity
+5. **Audit Retention:** Monthly partitions; primary 24mo retention + archive to cold storage; indefinite retention possible
+6. **Rate Cache:** Redis shared cache with key pattern `rate:{CC}:{BTC}:{YYYYMM}`, TTL 1 month
+
+---
+
+## Known Constraints & Invariants
+
+- **HCM conversion:** 1 HCM = 144 hours (fixed, not configurable)
+- **Budget unit:** K USD with 2 decimal places (e.g., `4.95` = $4,950)
+- **Rate periods:** `effective_from` = YYYYMM string; `effective_to` = system auto-calculated (next rate's effective_from minus 1 month)
+- **Project cap:** Resource cannot be allocated to >5 distinct projects in any calendar month (HARD, no override)
+- **Allocation semantics:** Override (replace) not accumulate — new allocation for (resource, project, week) replaces any existing
+- **Soft delete:** `is_active` flag everywhere; hard delete forbidden
+- **Approval gate:** All allocations require POD Manager approval before becoming effective
+- **Capacity validation:** Daily 8+2 regular OT, holiday 10h OT max, monthly 36h OT cap
+- **Import idempotency:** CSV imports tracked by `import_batch_id` to prevent duplicates
+
+---
+
+## Next Steps (Post-Planning)
+
+_Once implementation plan is created:_
+
+1. **Set up worktree** — `EnterWorktree` for isolated implementation branch
+2. **Backend Phase 1** — database schema (Alembic migrations), core CRUD APIs, validation layer
+3. **Backend Phase 2** — allocation engine, auto-allocation service, dependency/critical path algorithms
+4. **Frontend Phase 1** — project/resource list/detail pages, allocation grid (weekly calendar view)
+5. **Frontend Phase 2** — Gantt chart with drag-drop, dashboard charts, import/export UIs
+6. **Integration** — end-to-end testing, approval workflow, notification flows
+7. **DevOps** — Docker compose (PostgreSQL + Redis), CI/CD pipeline, migration scripts
+
+---
+
+## PRD Reference
+
+- **Path:** `doc/PRODUCT_REQUIREMENTS.md`
+- **Version:** 1.5 (final)
+- **Sections:** 1–18 + Appendices A–E
+- **Acceptance Criteria:** 28+ checkboxes (Section 11)
+- **Total Decisions:** 27 requirement clarifications + 6 architecture choices + 13 BA gaps + 10 technical gaps = **56 documented decisions**
+
+---
+
+## Stakeholder Scope
+
+| Role | Access | Primary Concerns |
+|------|--------|-----------------|
+| **POD Manager** | Full CRUD + Dashboard | Supply/demand, resource assignment, budget oversight |
+| **Project Manager** | Project CRUD + Allocation requests | Activity planning, resource booking, schedule tracking |
+| **Admin** | All entity management + Audit | Rate maintenance, holiday calendar, audit log viewer, soft delete |
+
+External stakeholder views deferred to future phase.
+
+---
+
+## Progress Metrics
+
+| Metric | Value |
+|--------|-------|
+| Clarification questions asked | 27 |
+| BA gaps identified | 13 |
+| Architecture decisions | 6 |
+| PRD version | 1.5 (UX decisions integrated) |
+| PRD sections | 18 + 5 appendices |
+| Acceptance criteria | 28+ |
+| Scope changes after validation | 0 (requirements stable) |
+| Time to consensus | ~2 hours of structured dialogue |
+| UX deliverables produced | 5 (flows, wireframes, Gantt spec, error cheatsheet, notification layout) |
+| UX decisions confirmed | 5 (Q1–Q5) |
+| TDD issues identified & remediated | 15 (3 critical blocks, 6 architecture fixes, 6 polish) |
+| Artifact dependency checks | 3 scripts + 1 manifest + hooks integration |
+
+---
+
+## Artifact Dependency Synchronization
+
+**Dependency Manifest:** `doc/DEPENDENCIES.yaml`
+**Check Scripts:**
+- `scripts/check_prd_deps.py` — validates PRD → UX sync
+- `scripts/check_ux_deps.py` — validates UX → Design sync
+- `scripts/check_design_deps.py` — validates Design → code/test sync
+
+**Git Hooks:** Integrated into `.claude-hooks.yaml`
+- Pre-commit: warns if doc changes have stale downstream dependencies
+- Post-commit: prints full dependency report
+- CI strict check: fails on PRD changes if downstream not reviewed
+
+**Rationale:** Prevent drift between artifacts. PRD is single source of truth; all downstream docs/code must stay aligned.
+
+---
+
+**Last Updated:** 2026-04-19
+**Updated By:** Claude (UX Deliverables Complete + Artifact Sync System Added)
