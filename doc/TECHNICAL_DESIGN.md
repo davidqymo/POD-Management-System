@@ -1183,6 +1183,80 @@ public enum ProjectStatus {
 
 **Guarded transition plan:** `DRAFT` → `ACTIVE` (no checks), `ACTIVE` → `ON_HOLD` / `COMPLETED` / `CANCELLED` / `SUSPENDED`, `ON_HOLD` → `ACTIVE` only. All other transitions rejected.
 
+### 6.4 Project Reactivation (Admin Only — 30-Day Undo Window)
+
+**`reactivateCancelledProject(Long projectId, String reason)`**
+
+```java
+// backend/src/main/java/com/pod/service/ProjectService.java
+@Service
+@Slf4j
+@RequiredArgsConstructor
+public class ProjectService {
+
+    @Transactional
+    public ProjectDTO reactivateCancelledProject(Long projectId, String reason) {
+        Project project = projectRepository.findByIdWithLock(projectId, LockModeType.PESSIMISTIC_WRITE)
+            .orElseThrow(() -> new ProjectNotFoundException(projectId));
+
+        // Validation: must be CANCELLED (not COMPLETED), within 30 days
+        if (project.getStatus() != ProjectStatus.CANCELLED) {
+            throw new IllegalArgumentException("Only CANCELLED projects are eligible for reactivation");
+        }
+        if (project.getUpdatedAt().isBefore(Instant.now().minus(30, ChronoUnit.DAYS))) {
+            throw new IllegalStateException("Project was cancelled more than 30 days ago; reactivation window closed");
+        }
+
+        // Restore
+        project.setStatus(ProjectStatus.ACTIVE);
+        project.setActive(true);
+        project.setUpdatedAt(Instant.now());
+        projectRepository.save(project);
+
+        // Unlock allocations that were frozen on cancellation
+        // PENDING allocations remain as-is (they were already rejected on cancel)
+        allocationRepository.unlockAfterReactivation(projectId);
+
+        // Audit
+        auditService.create(
+            AuditEntityType.PROJECT, projectId,
+            AuditOperation.REACTIVATE,
+            Map.of("previous_status", "CANCELLED", "reason", reason),
+            SecurityContextHolder.getContext().getAuthentication().getName()
+        );
+
+        log.info("Project {} reactivated by {} (was cancelled {})",
+            projectId, SecurityContextHolder.getContext().getAuthentication().getName(),
+            project.getUpdatedAt());
+
+        return ProjectMapper.toDTO(project);
+    }
+}
+```
+
+**Repository support:**
+
+```java
+// ProjectRepository.java
+@Lock(LockModeType.PESSIMISTIC_WRITE)
+@Query("SELECT p FROM Project p WHERE p.id = :id")
+Optional<Project> findByIdWithLock(@Param("id") Long id);
+
+// AllocationRepository.java
+@Modifying
+@Query("UPDATE Allocation a SET a.isActive = true, a.status = 'APPROVED', a.updatedAt = NOW() " +
+       "WHERE a.project.id = :projectId AND a.status = 'LOCKED' AND a.rejectionReason LIKE 'Resource terminated%'")
+int unlockAfterReactivation(@Param("projectId") Long projectId);
+```
+
+**Frontend:** Admin-only button on Cancelled project card: "Reactivate" (visible only if `cancelled_at > 30 days ago`). Confirmation modal includes reason field (required ≥10 chars).
+
+**Error codes:**
+- `REACTIVATION_WINDOW_CLOSED` — cancelled >30 days ago
+- `PROJECT_NOT_CANCELLED` — only CANCELLED status eligible
+
+**End-to-end trace:** UC-PM-05 in SPEC_FUNCTIONAL Section 4.1.
+
 ---
 
 ### 6.2 Critical Path Calculator (PERT/CPM)
@@ -2209,7 +2283,18 @@ public class MaterializedViewRefreshTask {
 { "sub": "user-id", "roles": ["PM"], "cost_center_id": "CC-TECH", "exp": 1713465600 }
 ```
 
-### 10.2 RBAC Matrix
+### 10.2 Role Definitions
+
+| Role | Primary Modules | Key Permissions | Notes |
+|------|----------------|-----------------|-------|
+| **Project Manager (PM)** | Project, Allocation (submit) | Create/edit projects, submit allocations (PENDING), view dashboard, copy templates | Cannot approve own allocations; can view all projects in assigned cost centers |
+| **POD Manager** | Allocation (approve), Resource (status), Dashboard | Approve/reject any allocation, change resource status (`ON_LEAVE`, `TERMINATED`), run auto-allocation, view all projects across pods | Four-eyes enforced: cannot approve allocations for resources they manage |
+| **Admin** | Resource, Rate, Holiday, Audit, Import/Export | Full CRUD on all entities, CSV import/export, audit log viewer, soft-delete override, reactivate cancelled projects | Can impersonate any user for support (audit-logged) |
+| **Viewer** | Read-only Dashboard, Projects, Resources | View-only access; no create/update/delete; no approval | Default for contractors without PM/approver duties |
+
+Roles stored in `users.roles` JSONB array: `["ADMIN"]`, `["PM"]`, `["POD_MANAGER"]`, `["VIEWER"]`. JWT claims mirror DB roles on login.
+
+### 10.3 RBAC Matrix
 
 | Endpoint                         | Method | Role Required                |
 | -------------------------------- | ------ | ---------------------------- |
@@ -2426,14 +2511,15 @@ public Resource updateResource(Long id, UpdateResourceRequest req) {
 | Event Type                       | Trigger                                                              | Channel        | Priority  |
 | -------------------------------- | -------------------------------------------------------------------- | -------------- | --------- |
 | `ALLOCATION_SUBMITTED`           | PM creates an allocation with `PENDING` status                       | In-app + Email | High      |
-| `ALLOCATION_APPROVED`            | POD Manager approves allocation (status → `APPROVED`)                | In-app         | Medium    |
+| `ALLOCATION_APPROVED`            | POD Manager approves allocation (status → `APPROVED`)                | In-app + Email | Medium    |
 | `ALLOCATION_REJECTED`            | POD Manager rejects allocation (status → `REJECTED`)                 | In-app + Email | High      |
 | `BUDGET_EXCEED_WARNING`          | Project burn rate ≥ budget threshold (configurable, default 80%)     | In-app         | High      |
-| `PROJECT_STATUS_TRANSITION`      | Project status changes (DRAFT → ACTIVE, ACTIVE → COMPLETED, etc.)    | In-app         | Low       |
-| `AUTO_ALLOCATION_FAILED`         | Auto-allocation engine could not satisfy constraint (5-project cap, no availability) | In-app         | Medium    |
-| `AUTO_ALLOCATION_SUCCEEDED`      | Auto-allocation engine successfully assigned resource               | In-app         | Low       |
+| `PROJECT_STATUS_TRANSITION`      | Project status changes (DRAFT → ACTIVE, ACTIVE → COMPLETED, etc.)    | In-app + Email | Low       |
+| `AUTOALLOCATION_COMPLETE`        | Auto-allocation engine run finished (success or partial failure)    | In-app         | Medium    |
 | `PROJECT_VERSION_MAJOR`          | Major version change detected on critical task                       | In-app + Email | High      |
 | `HOLIDAY_CALENDAR_UPDATED`       | Admin adds/updates regional holiday affecting capacity calculation  | In-app         | Low       |
+| `RATE_CHANGED`                  | New rate becomes effective for cost center/team impacting active project costs | In-app + Email | Medium    |
+| `RESOURCE_STATUS_CHANGED`        | Resource status changed (ON_LEAVE or TERMINATED)                     | In-app + Email | High      |
 
 **Default Notification Distribution Rules:**
 
@@ -2444,10 +2530,13 @@ public Resource updateResource(Long id, UpdateResourceRequest req) {
 | ALLOCATION_REJECTED      | Submitting Project Manager + Resource         | ✅ Yes      |
 | BUDGET_EXCEED_WARNING    | Project Owner + Finance Lead                  | ✅ Yes      |
 | PROJECT_STATUS_TRANSITION| Project Team (all assigned PMs and Resources) | ❌ In-app only |
-| AUTO_ALLOCATION_FAILED   | POD Manager + System Admin                    | ✅ Yes      |
-| AUTO_ALLOCATION_SUCCEEDED| POD Manager                                   | ❌ In-app only | 
+| AUTOALLOCATION_COMPLETE  | POD Manager + System Admin                    | ✅ Yes      |
 | PROJECT_VERSION_MAJOR    | All stakeholders (PM, POD, Architect)         | ✅ Yes      |
 | HOLIDAY_CALENDAR_UPDATED | All POD Managers                              | ❌ In-app only |
+| RATE_CHANGED            | Project Managers of affected active projects  | ✅ Yes      |
+| RESOURCE_STATUS_CHANGED | Assigned Project Managers of affected resource| ✅ Yes      |
+| RATE_CHANGED            | Project Managers of affected active projects | ✅ Yes      |
+| RESOURCE_STATUS_CHANGED | Assigned Project Managers of affected resource | ✅ Yes      |
 
 **Email Template Variables:** `{project_name}`, `{resource_name}`, `{allocated_hours}`, `{week_start_date}`, `{approver_name}`, `{rejection_reason}`, `{triggering_field}`, `{old_value}`, `{new_value}`.
 
@@ -2962,10 +3051,11 @@ const NotificationItem = ({ notification }: NotificationItemProps) => {
     ALLOCATION_REJECTED:  '❌',
     BUDGET_EXCEED_WARNING: '⚠️',
     PROJECT_STATUS_TRANSITION: '🔄',
-    AUTO_ALLOCATION_FAILED: '🤖',
-    AUTO_ALLOCATION_SUCCEEDED: '✨',
+    AUTOALLOCATION_COMPLETE:  '🤖',  // success → green; failure → red (determined from payload.status)
     PROJECT_VERSION_MAJOR: '📌',
     HOLIDAY_CALENDAR_UPDATED: '📅',
+    RATE_CHANGED:          '💰',
+    RESOURCE_STATUS_CHANGED:'👤',
   };
 
   return (
@@ -2991,13 +3081,33 @@ const NotificationItem = ({ notification }: NotificationItemProps) => {
 ```typescript
 type NotificationDTO = {
   id: string;
-  eventType: string;           // e.g., 'ALLOCATION_SUBMITTED'
-  title: string;               // e.g., 'Allocation submitted for approval'
-  body: string;                // e.g., 'Sarah Johnson submitted 40 hours for Phoenix (Week of Apr 7)'
+  eventType: string;           // e.g. 'ALLOCATION_SUBMITTED', 'AUTOALLOCATION_COMPLETE', 'RATE_CHANGED'
+  title: string;               // e.g. 'Allocation submitted for approval'
+  body: string;                // e.g. 'Sarah Johnson submitted 40 hours for Phoenix (Week of Apr 7)'
   createdAt: string;           // ISO 8601
   read: boolean;
-  entityRef?: {               // Optional link to related entity
-    type: 'allocation' | 'project' | 'resource';
+  payload?: {                  // Optional event-specific data
+    // AUTOALLOCATION_COMPLETE:
+    status?: 'SUCCEEDED' | 'PARTIAL' | 'FAILED';
+    succeededCount?: number;
+    failedCount?: number;
+    failures?: { activityId: string; errorCode: string; reason: string }[];
+
+    // RATE_CHANGED:
+    costCenterId?: string;
+    billableTeamCode?: string;
+    effectiveFrom?: string;    // YYYYMM
+    oldRateK?: number;
+    newRateK?: number;
+
+    // RESOURCE_STATUS_CHANGED:
+    resourceId?: string;
+    oldStatus?: string;
+    newStatus?: string;
+  } | null;
+
+  entityRef?: {               // Optional deep link
+    type: 'allocation' | 'project' | 'resource' | 'activity';
     id: string;
   } | null;
 };
@@ -3114,10 +3224,11 @@ const NotificationItem = ({ notification }: NotificationItemProps) => {
     ALLOCATION_REJECTED:  '❌',
     BUDGET_EXCEED_WARNING: '⚠️',
     PROJECT_STATUS_TRANSITION: '🔄',
-    AUTO_ALLOCATION_FAILED: '🤖',
-    AUTO_ALLOCATION_SUCCEEDED: '✨',
+    AUTOALLOCATION_COMPLETE:  '🤖',  // success → green; failure → red (determined from payload.status)
     PROJECT_VERSION_MAJOR: '📌',
     HOLIDAY_CALENDAR_UPDATED: '📅',
+    RATE_CHANGED:          '💰',
+    RESOURCE_STATUS_CHANGED:'👤',
   };
 
   return (
@@ -3143,13 +3254,33 @@ const NotificationItem = ({ notification }: NotificationItemProps) => {
 ```typescript
 type NotificationDTO = {
   id: string;
-  eventType: string;           // e.g., 'ALLOCATION_SUBMITTED'
-  title: string;               // e.g., 'Allocation submitted for approval'
-  body: string;                // e.g., 'Sarah Johnson submitted 40 hours for Phoenix (Week of Apr 7)'
+  eventType: string;           // e.g. 'ALLOCATION_SUBMITTED', 'AUTOALLOCATION_COMPLETE', 'RATE_CHANGED'
+  title: string;               // e.g. 'Allocation submitted for approval'
+  body: string;                // e.g. 'Sarah Johnson submitted 40 hours for Phoenix (Week of Apr 7)'
   createdAt: string;           // ISO 8601
   read: boolean;
-  entityRef?: {               // Optional link to related entity
-    type: 'allocation' | 'project' | 'resource';
+  payload?: {                  // Optional event-specific data
+    // AUTOALLOCATION_COMPLETE:
+    status?: 'SUCCEEDED' | 'PARTIAL' | 'FAILED';
+    succeededCount?: number;
+    failedCount?: number;
+    failures?: { activityId: string; errorCode: string; reason: string }[];
+
+    // RATE_CHANGED:
+    costCenterId?: string;
+    billableTeamCode?: string;
+    effectiveFrom?: string;    // YYYYMM
+    oldRateK?: number;
+    newRateK?: number;
+
+    // RESOURCE_STATUS_CHANGED:
+    resourceId?: string;
+    oldStatus?: string;
+    newStatus?: string;
+  } | null;
+
+  entityRef?: {               // Optional deep link
+    type: 'allocation' | 'project' | 'resource' | 'activity';
     id: string;
   } | null;
 };
@@ -4089,7 +4220,12 @@ All service layers return structured error responses with a canonical error code
 | Code                         | HTTP Status | Component               | Description                                                                 |
 | ---------------------------- | ----------- | ----------------------- | --------------------------------------------------------------------------- |
 | `ALLOCATION_CONFLICT`        | 409         | Allocation Service      | Optimistic lock version mismatch; concurrent edit detected                 |
+| `CYCLE_DETECTED`            | 409         | Activity Service        | Activity dependency graph would become cyclic (DFS detection failed)       |
 | `DAILY_HOURS_EXCEEDED`      | 400         | ConstraintValidator     | Proposed daily avg > 10h                                                    |
+| `VALIDATION_ERROR`          | 400         | API Layer               | Input fails schema validation (field-level errors with details map)        |
+| `DUPLICATE_KEY`             | 409         | Repository              | Unique constraint violation (e.g., external_id already exists)            |
+| `NOT_FOUND`                 | 404         | API Layer               | Record doesn't exist or is soft-deleted                                    |
+| `UNAUTHORIZED`              | 403         | Security Filter         | RBAC permission denied (user lacks required role for endpoint)             |
 | `MONTHLY_CAP_EXCEEDED`      | 400         | ConstraintValidator     | Total monthly hours > 144h                                                  |
 | `OT_MONTHLY_CAP`            | 400         | ConstraintValidator     | Monthly OT (total – 144) > 36h                                              |
 | `PROJECT_SPREAD_LIMIT`      | 400         | ConstraintValidator     | Resource already assigned to 5 distinct projects in target month           |
@@ -4126,7 +4262,12 @@ All service layers return structured error responses with a canonical error code
 | Code                         | HTTP Status | Component               | Description                                                                 |
 | ---------------------------- | ----------- | ----------------------- | --------------------------------------------------------------------------- |
 | `ALLOCATION_CONFLICT`        | 409         | Allocation Service      | Optimistic lock version mismatch; concurrent edit detected                 |
+| `CYCLE_DETECTED`            | 409         | Activity Service        | Activity dependency graph would become cyclic (DFS detection failed)       |
 | `DAILY_HOURS_EXCEEDED`      | 400         | ConstraintValidator     | Proposed daily avg > 10h                                                    |
+| `VALIDATION_ERROR`          | 400         | API Layer               | Input fails schema validation (field-level errors with details map)        |
+| `DUPLICATE_KEY`             | 409         | Repository              | Unique constraint violation (e.g., external_id already exists)            |
+| `NOT_FOUND`                 | 404         | API Layer               | Record doesn't exist or is soft-deleted                                    |
+| `UNAUTHORIZED`              | 403         | Security Filter         | RBAC permission denied (user lacks required role for endpoint)             |
 | `MONTHLY_CAP_EXCEEDED`      | 400         | ConstraintValidator     | Total monthly hours > 144h                                                  |
 | `OT_MONTHLY_CAP`            | 400         | ConstraintValidator     | Monthly OT (total – 144) > 36h                                              |
 | `PROJECT_SPREAD_LIMIT`      | 400         | ConstraintValidator     | Resource already assigned to 5 distinct projects in target month           |
