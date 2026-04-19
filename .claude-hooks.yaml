@@ -1,0 +1,100 @@
+# Claude Code 生命周期钩子 · 企业最佳实践
+version: 1.0
+auto_hook: true
+
+# 会话启动钩子：打开项目自动恢复+自检
+on_session_start:
+  - read PROGRESS.md  # 加载上次开发断点
+  - check git dirty files  # 检查未提交代码
+  - clear expired useless context  # 清理冗余旧上下文
+  - auto summarize long history  # 超长上下文自动摘要
+  - verify project architecture & scope  # 校验项目边界
+  - remind unfinished tasks
+
+# 每次AI回复完成后钩子：自动同步进度
+on_reply_finish:
+  - auto update PROGRESS.md  # 自动写入本次修改、方案、节点
+  - record modified files & key decisions
+  - trim redundant chat details
+  - keep only core logic context
+
+# 会话关闭/退出终端钩子：下线前快照+压缩保存
+on_session_exit:
+  - compress full conversation to concise summary  # 上下文压缩瘦身
+  - save session checkpoint snapshot
+  - update final progress & next todo
+  - git stash uncommitted temporary changes
+  - archive important scheme records
+
+# 上线/合并PR/部署触发钩子：发布归档清空脏上下文
+on_deploy_merge:
+  - freeze current development context
+  - archive full chat history & technical decisions
+  - clean temporary debug context
+  - reset lightweight working context
+  - generate ADR architecture record
+
+# Token 阈值自动压缩规则（防止失忆、逻辑混乱）
+context_limit:
+  max_token_threshold: 85%
+  auto_compact_when_exceed: true
+  retain: 架构方案、接口逻辑、Bug方案、当前断点
+  discard: 闲聊、重复调试、冗余问答
+
+# 长期记忆绑定
+persist_memory:
+  bind_claude_md: true
+  bind_progress_md: true
+  cross_device_sync: true
+
+# --- Artifact Dependency Synchronization Hooks ---
+# Automatically detect PRD/UX/Design changes and flag downstream artifacts needing review.
+# Uses scripts/check_artifact_deps.py with dependency graph from doc/DEPENDENCIES.yaml
+
+# Pre-commit: Check if changed doc files have stale dependencies
+on_pre_commit:
+  - name: Check artifact dependencies for changed docs
+    condition: "git diff --cached --name-only | grep '^doc/.*\\.md$'"
+    script: "python scripts/check_artifact_deps.py --changed $(git diff --cached --name-only | grep '^doc/')"
+    # Non-blocking: warns but allows commit; use --strict in CI to block
+
+# Post-commit: Verify sync after commit (informational)
+on_post_commit:
+  - name: Verify artifact sync after commit
+    condition: "git diff-tree --no-commit-id --name-only -r HEAD | grep '^doc/.*\\.md$'"
+    script: "python scripts/check_artifact_deps.py"
+    # Prints actionable report of stale downstream artifacts
+
+# On PRD change: Run strict check (used in CI)
+ci_checks:
+  - name: Artifact dependency strict check (PRD changes)
+    trigger: "push|pull_request"
+    paths: ['doc/PRODUCT_REQUIREMENTS.md']
+    script: "python scripts/check_artifact_deps.py --strict --changed doc/PRODUCT_REQUIREMENTS.md"
+    # Fails CI if downstream artifacts are out of sync
+
+# --- Artifact Dependency Synchronization Hooks ---
+# Automatically detect PRD/UX/Design changes and flag downstream artifacts needing review.
+# Uses scripts/check_artifact_deps.py with dependency graph from doc/DEPENDENCIES.yaml
+
+# Pre-commit: Check if changed doc files have stale dependencies
+on_pre_commit:
+  - name: Check artifact dependencies for changed docs
+    condition: "git diff --cached --name-only | grep '^doc/.*\\.md$'"
+    script: "python scripts/check_artifact_deps.py --changed $(git diff --cached --name-only | grep '^doc/')"
+    # Non-blocking: warns but allows commit; use --strict in CI to block
+
+# Post-commit: Verify sync after commit (informational)
+on_post_commit:
+  - name: Verify artifact sync after commit
+    condition: "git diff-tree --no-commit-id --name-only -r HEAD | grep '^doc/.*\\.md$'"
+    script: "python scripts/check_artifact_deps.py"
+    # Prints actionable report of stale downstream artifacts
+
+# On PRD change: Run strict check (used in CI)
+ci_checks:
+  - name: Artifact dependency strict check (PRD changes)
+    trigger: "push|pull_request"
+    paths: ['doc/PRODUCT_REQUIREMENTS.md']
+    script: "python scripts/check_artifact_deps.py --strict --changed doc/PRODUCT_REQUIREMENTS.md"
+    # Fails CI if downstream artifacts are out of sync

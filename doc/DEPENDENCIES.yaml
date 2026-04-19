@@ -1,0 +1,57 @@
+artifacts:
+  PRODUCT_REQUIREMENTS:
+    path: doc/PRODUCT_REQUIREMENTS.md
+    description: "Source of truth — all business requirements, acceptance criteria, constraints"
+    triggers:
+      - doc/UX_DELIVERABLES.md
+      - doc/TECHNICAL_DESIGN.md
+      - docs/superpowers/specs/*.md
+      - docs/superpowers/plans/*.md
+    check: "scripts/check_prd_deps.py"
+    on_change: |
+      - Verify UX_DELIVERABLES.md covers all acceptance criteria
+      - Verify TECHNICAL_DESIGN.md architecture decisions still hold
+      - Notify: UX and Design owners for review
+
+  UX_DELIVERABLES:
+    path: doc/UX_DELIVERABLES.md
+    description: "UX flows, wireframes, interaction specs derived from PRD"
+    triggers:
+      - doc/TECHNICAL_DESIGN.md
+      - frontend/src/**/*.tsx
+      - frontend/src/**/*.ts
+    check: "scripts/check_ux_deps.py"
+    on_change: |
+      - Verify TECHNICAL_DESIGN.md reflects confirmed UX decisions
+      - Verify frontend components match wireframes
+      - Notify: Design and Frontend owners for review
+
+  TECHNICAL_DESIGN:
+    path: doc/TECHNICAL_DESIGN.md
+    description: "Technical architecture, data model, API design, algorithm specs"
+    triggers:
+      - backend/**/*.py
+      - frontend/src/**/*.ts
+      - frontend/src/**/*.tsx
+      - tests/**/*.py
+      - alembic/versions/*.py
+    check: "scripts/check_design_deps.py"
+    on_change: |
+      - Verify backend code matches data model spec
+      - Verify API endpoints match spec
+      - Verify test coverage for all design modules
+      - Notify: Backend and Frontend owners for review
+
+  # Future artifacts (Phase 2+)
+  # API_SPEC:
+  #   path: doc/API_SPEC.md
+  #   triggers:
+  #     - backend/app/routers/**/*.py
+  #     - frontend/src/api/**/*.ts
+  #   check: "scripts/check_api_spec.py"
+  #
+  # TEST_PLAN:
+  #   path: doc/TEST_PLAN.md
+  #   triggers:
+  #     - tests/**/*.py
+  #   check: "scripts/check_test_coverage.py"

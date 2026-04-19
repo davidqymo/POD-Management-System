@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3:*)",
+      "Bash(sed -n '1,120p' backend/pyproject.toml)",
+      "Bash(sed -n '1,120p' pyproject.toml)",
+      "Bash(awk '/^## 5\\\\. API Design/,/^## [6-9]\\\\./' \"D:\\\\projects\\\\POD Team Management System\\\\doc\\\\TECHNICAL_DESIGN.md\")",
+      "Bash(python:*)",
+      "Bash(iconv -f gbk -t utf-8)",
+      "Bash(git commit:*)"
+    ]
+  }
+}

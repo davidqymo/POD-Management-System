@@ -1,0 +1,44 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+env/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Node
+node_modules/
+dist/
+.vite/
+*.log
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# Secrets
+.env
+.secrets/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# DB dumps
+*.dump
+*.sql
+
+# Docker volumes
+postgres_data/
+redis_data/
+
+# Test artifacts
+.pytest_cache/
+.coverage
+htmlcov/
