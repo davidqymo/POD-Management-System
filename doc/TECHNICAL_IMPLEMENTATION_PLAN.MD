@@ -518,26 +518,34 @@ git add backend/src/main/java/com/pod/repository/ backend/src/test/java/com/pod/
 git commit -m "feat(repo): implement JPA repositories with custom queries and pessimistic locks"
 ```
 
-#### Task T1.4: Service Layer — ResourceService (status transitions) + RateService (contiguity)
+#### Task T1.4: Service Layer — ResourceService (status transitions) + RateService (contiguity) ✅ COMPLETE
 
 **Files:**
-- Create: `backend/src/main/java/com/pod/service/ResourceService.java`
-- Create: `backend/src/main/java/com/pod/service/RateService.java`
-- Create: `backend/src/test/java/com/pod/service/ResourceServiceTest.java`
-- Create: `backend/src/test/java/com/pod/service/RateServiceTest.java`
+- ✅ Create: `backend/src/main/java/com/pod/service/ResourceService.java`
+- ✅ Create: `backend/src/main/java/com/pod/service/RateService.java`
+- ✅ Create: `backend/src/test/java/com/pod/service/ResourceServiceTest.java`
+- ✅ Create: `backend/src/test/java/com/pod/service/RateServiceTest.java`
+- ✅ Update: `backend/src/test/java/com/pod/repository/RepositoryTestConfig.java` — added `@ComponentScan("com.pod.service")`
 
-**ResourceService:** Implement `changeStatus(Long resourceId, ResourceStatus newStatus, String reason)` with transition validation and audit logging.
+**ResourceService:** Implemented `changeStatus(Long resourceId, ResourceStatus newStatus, String reason)` — acquires PESSIMISTIC_WRITE lock via `EntityManager.find()`, validates via `Resource.isValidTransition()`, applies status change, persists, and logs audit (stub). Throws `InvalidStatusTransitionException` for illegal transitions.
 
-**RateService:** Implement `createRate(CreateRateRequest)` — obtains `PESSIMISTIC_WRITE` lock on active rate, closes it by setting `effective_to = NEW.effective_from - 1 month`, inserts new rate with `effective_to = null`. Enforce:
-- `NEW.effective_from` must be exactly `PREV.effective_from + 1 month`
-- No overlapping periods (unique partial index enforces this)
+**RateService:** Implemented `createRate(CreateRateRequest)` — acquires PESSIMISTIC_WRITE lock via `RateRepository.findByCostCenterIdAndBillableTeamCodeAndEffectiveToIsNull()`, validates `new.effectiveFrom == prev.effectiveFrom + 1 month` using `YearMonth` arithmetic, closes previous rate by setting `effectiveTo` to `(new month) - 1`, saves both. Gap (>1 month jump) throws `RatePeriodGapException`.
 
-**Tests:**
-- `ResourceServiceTest.testChangeStatus_validTransition_succeeds()`
-- `ResourceServiceTest.testChangeStatus_invalidTransition_throws()`
-- `RateServiceTest.testCreateRate_contiguousSequence_succeeds()`
-- `RateServiceTest.testCreateRate_gapDetected_throwsRatePeriodGapException()`
-- `RateServiceTest.testConcurrentRateCreation_pessimisticLockPreventsDoubleClose()`
+**Tests (5 passing):**
+- ✅ `ResourceServiceTest.testChangeStatus_validTransition_succeeds()`
+- ✅ `ResourceServiceTest.testChangeStatus_invalidTransition_throws()`
+- ✅ `RateServiceTest.testCreateRate_contiguousSequence_succeeds()`
+- ✅ `RateServiceTest.testCreateRate_gapDetected_throwsRatePeriodGapException()`
+- ✅ `RateServiceTest.testConcurrentRateCreation_pessimisticLockPreventsDoubleClose()`
+
+**TDD Cycle:** RED (failing tests written) → GREEN (minimal implementation) — all 5 tests green
+
+**Implementation notes:**
+- `RateRepository` uses Spring Data JPA derived query `findByCostCenterIdAndBillableTeamCodeAndEffectiveToIsNull()` with `@Lock(PESSIMISTIC_WRITE)` — simpler than JPQL + setLockMode
+- `RepositoryTestConfig` extended with `@ComponentScan("com.pod.service")` to make `@SpringBootTest` work without a main application class
+- Tests call `rateRepository.flush()` just after `save()` to ensure JPQL query sees the newly inserted rate before service executes (H2 flush semantics)
+- `ResourceService.changeStatus()` uses `System.out.printf` audit stub — ready for `AuditService` injection in REFACTOR phase
+- Optimistic lock retry not yet implemented — deferred to later sprint (not required by current tests)
 
 **TDD Cycle:**
 - [ ] Write failing test asserting `RatePeriodGapException` thrown when `effective_from` jumps 2+ months
