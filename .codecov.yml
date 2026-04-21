@@ -1,0 +1,30 @@
+# Sprint 0 T0.6 — Coverage Quality Gate
+# Enforces 80% line coverage across backend (JaCoCo) + frontend (c8)
+
+coverage:
+  status:
+    project:
+      default:
+        target: 80%
+        if_ci_failed: error  # CI fail = fail quality gate
+        if_not_found: success # allow initial PRs to pass
+        only_pulls: true       # only check PR delta, not main branch
+
+comment:
+  layout: "reach, diff, flags, files"
+  behavior: default
+  require_changes: false
+
+flag_management:
+  default:
+    paths:
+      - "backend/**"           # Java/Be tests
+      - "!backend/**/test/**"   # exclude test sources from coverage
+  backend-unit:
+    paths:
+      - "backend/src/main/java"
+    carryforward: false
+  frontend-unit:
+    paths:
+      - "frontend/src/**"
+    carryforward: false
