@@ -61,6 +61,8 @@ class RateServiceTest {
             .isBillable(true)
             .isActive(true)
             .build());
+        // Force INSERT so query can find it
+        rateRepository.flush();
 
         // Create request for next month (202601)
         RateService.CreateRateRequest request = new RateService.CreateRateRequest(
@@ -84,7 +86,7 @@ class RateServiceTest {
     @Test
     void testCreateRate_gapDetected_throwsRatePeriodGapException() {
         // Given: an active rate covering 202512
-        rateRepository.save(Rate.builder()
+        Rate existing = rateRepository.save(Rate.builder()
             .costCenterId("ENG-CC2")
             .billableTeamCode("BTC-WEB")
             .monthlyRateK(new BigDecimal("140.00"))
@@ -93,6 +95,8 @@ class RateServiceTest {
             .isBillable(true)
             .isActive(true)
             .build());
+        // Force INSERT so JPQL query can see it
+        rateRepository.flush();
 
         // Create request skipping a month (202603 skips Jan & Feb)
         RateService.CreateRateRequest request = new RateService.CreateRateRequest(
