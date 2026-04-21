@@ -12,7 +12,7 @@
 **Phase 1.5 (UX Design Deliverables):** ✅ **COMPLETE**
 **Phase 2 (Implementation Planning):** ✅ **COMPLETE**
 **Phase 2.5 (TDD Remediation):** ✅ **COMPLETE** — v2.1 → v2.2 critical block fixes (5 P0 + 5 P2), then v2.2 → v2.3 SFS alignment fixes (2 blocking notification events + 3 P1 service/error matrix)
-**Phase 3 (Implementation Execution):** 🎯 **READY TO START** — implementation plan at `docs/superpowers/plans/2026-04-19-pod-team-management-phase1.md`
+**Phase 3 (Implementation Execution):** 🎯 **READY TO START** — implementation plan at `doc/TECHNICAL_IMPLEMENTATION_PLAN.MD` (approved v1.0 with QA review at `doc/TECHNICAL_IMPLEMENTATION_PLAN_QA_REVIEW.MD`)
 
 **TDD Version History:**
 | Version | Date       | Changes Summary |
@@ -74,9 +74,11 @@ All major decisions documented in `doc/PRODUCT_REQUIREMENTS.md` (v1.5). PRD upda
 
 ## In-Progress Tasks
 
-- [ ] **Implementation Planning** — create detailed task breakdown using `superpowers:writing-plans`
-  - Current Progress: 0% — PRD complete; awaiting plan creation
-  - Blockers: None — ready to proceed
+- [ ] **Sprint 0 Implementation** — infrastructure + TDD scaffolding
+  - Current Progress: 100% (T0.1–T0.6/6 complete ✅)
+  - Last updated: 2026-04-21
+  - Deliverables: T0.1–T0.4 all comm cherry-picked; details below
+  - Next: Sprint 1 Task T1.1 — Entity layer (Resource, Rate, Rate, Project, Activity, Dependency, Allocation, Holiday, Audit, Notification)
 
 ---
 
