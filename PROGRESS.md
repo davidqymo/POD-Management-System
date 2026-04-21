@@ -74,11 +74,29 @@ All major decisions documented in `doc/PRODUCT_REQUIREMENTS.md` (v1.5). PRD upda
 
 ## In-Progress Tasks
 
-- [ ] **Sprint 0 Implementation** — infrastructure + TDD scaffolding
-  - Current Progress: 100% (T0.1–T0.6/6 complete ✅)
+- [x] **Sprint 0 Implementation** — infrastructure + TDD scaffolding
+  - Status: 100% (T0.1–T0.6/6 complete ✅)
   - Last updated: 2026-04-21
-  - Deliverables: T0.1–T0.4 all comm cherry-picked; details below
-  - Next: Sprint 1 Task T1.1 — Entity layer (Resource, Rate, Rate, Project, Activity, Dependency, Allocation, Holiday, Audit, Notification)
+
+- [x] **Sprint 1: Task T1.1 — Entity Layer** (Resource + Rate JPA mappings)
+  - Status: ✅ COMPLETE (5 entities: Resource, Rate, Project, Activity, ActivityDependency, Allocation, Holiday, AuditLog, Notification)
+
+- [x] **Sprint 1: Task T1.2 — Flyway Migrations** (V1 + V2)
+  - Status: ✅ COMPLETE (V1 schema + V2 audit triggers + V1.1-V1.4 seed data)
+
+- [x] **Sprint 1: Task T1.3 — Repository Layer** (Spring Data JPA)
+  - Status: ✅ COMPLETE (ResourceRepository, RateRepository with custom queries + pessimistic locks)
+
+- [x] **Sprint 1: Task T1.4 — Service Layer** (ResourceService + RateService)
+  - Status: ✅ COMPLETE (5 tests passing: changeStatus x2, createRate x3)
+  - Implemented: ResourceService.changeStatus() with pessimistic locking + validation, RateService.createRate() with contiguous month validation + gap detection
+
+- [ ] **Sprint 1: Task T1.5 — Controller Layer** (Resource + Rate REST APIs)
+  - Status: PENDING
+  - Next: ResourceController + RateController with CRUD endpoints
+
+- [ ] **Sprint 1: Task T1.6 — Frontend** (Resource List + CSV Import)
+  - Status: PENDING
 
 ---
 

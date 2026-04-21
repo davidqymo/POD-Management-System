@@ -5,10 +5,12 @@ import com.pod.entity.ResourceCategory;
 import com.pod.entity.ResourceStatus;
 import com.pod.exception.InvalidStatusTransitionException;
 import com.pod.repository.ResourceRepository;
+import com.pod.repository.RepositoryTestConfig;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.annotation.Rollback;
+import org.springframework.test.context.ContextConfiguration;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -25,6 +27,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  *   - testChangeStatus_invalidTransition_throws()
  */
 @SpringBootTest
+@ContextConfiguration(classes = RepositoryTestConfig.class)
 @TestPropertySource(properties = {
     "spring.datasource.url=jdbc:h2:mem:testdb;DB_CLOSE_DELAY=-1;MODE=PostgreSQL",
     "spring.datasource.driver-class-name=org.h2.Driver",

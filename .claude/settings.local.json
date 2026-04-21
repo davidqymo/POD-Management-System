@@ -7,7 +7,16 @@
       "Bash(awk '/^## 5\\\\. API Design/,/^## [6-9]\\\\./' \"D:\\\\projects\\\\POD Team Management System\\\\doc\\\\TECHNICAL_DESIGN.md\")",
       "Bash(python:*)",
       "Bash(iconv -f gbk -t utf-8)",
-      "Bash(git commit:*)"
+      "Bash(git commit:*)",
+      "Bash(mvn clean:*)",
+      "Bash(mvn test:*)",
+      "Bash(./mvnw compile:*)",
+      "Bash(mvn compile:*)",
+      "Bash(find:*)",
+      "Bash(xargs -I{} sh -c 'echo \"=== {} ===\"; sed -n \"1,200p\" \"D:/projects/POD Team Management System/backend/target/surefire-reports/{}\"')",
+      "Bash(rm -rf \"D:/projects/POD Team Management System/backend/target\")",
+      "Bash(mkdir -p \"D:/projects/POD Team Management System/backend/src/main/java/com/pod/service\")",
+      "Bash(git add:*)"
     ]
   }
 }

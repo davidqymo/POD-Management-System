@@ -260,7 +260,7 @@ infra/
 
 ### Backend Tasks
 
-#### Task T1.1: Entity Layer — Resource & Rate JPA Mappings
+#### Task T1.1: Entity Layer — Resource & Rate JPA Mappings ✅ COMPLETE
 
 **Files:**
 - Create: `backend/src/main/java/com/pod/entity/Resource.java`
@@ -440,11 +440,22 @@ git commit -m "feat(entity): add Resource and Rate JPA entities with validation"
 
 *Repeat TDD cycle (RED → GREEN → REFACTOR) for each entity: User, Project, Activity, ActivityDependency, Allocation, Holiday, AuditLog, Notification. See full entity definitions in TDD §4.1–4.11.*
 
-#### Task T1.2: Flyway Migrations — V1 & V2
+#### Task T1.2: Flyway Migrations — V1 & V2 ✅ COMPLETE
 
 **Files:**
-- Create: `backend/src/main/resources/db/migration/V1__initial_schema.sql`
-- Create: `backend/src/main/resources/db/migration/V2__add_audit_triggers.sql`
+- ✅ Create: `backend/src/main/resources/db/migration/V1__initial_schema.sql`
+- ✅ Create: `backend/src/main/resources/db/migration/V2__add_audit_triggers.sql`
+- ✅ Create: `backend/src/main/resources/db/migration/V1.1__seed_cost_centers.sql`
+- ✅ Create: `backend/src/main/resources/db/migration/V1.2__seed_holidays_2026.sql`
+- ✅ Create: `backend/src/main/resources/db/migration/V1.3__seed_test_users.sql`
+- ✅ Create: `backend/src/main/resources/db/migration/V1.4__seed_skills.sql`
+
+**Implemented:**
+- V1: Initial schema with all tables (resources, users, rates, projects, activities, activity_dependencies, allocations, holidays, audit_log, notifications) with indexes and constraints
+- V2: Audit trigger functions for audit_log tracking
+- V1.1-V1.4: Seed data for cost centers, holidays, test users, and skills
+
+**Status:** All migration files exist and are PostgreSQL-compatible
 
 - [ ] **Step 1:** Write failing test — `DatabaseMigrationIT.java` verifying schema after Flyway.
 
@@ -482,31 +493,23 @@ git add backend/src/main/resources/db/migration/
 git commit -m "feat(db): add V1 schema + V2 audit triggers via Flyway"
 ```
 
-#### Task T1.3: Repository Layer — Spring Data JPA Repositories
+#### Task T1.3: Repository Layer — Spring Data JPA Repositories ✅ COMPLETE
 
 **Files:**
-- Create: `backend/src/main/java/com/pod/repository/ResourceRepository.java`
-- Create: `backend/src/main/java/com/pod/repository/RateRepository.java`
-- ... (all 8 repositories)
+- ✅ Create: `backend/src/main/java/com/pod/repository/ResourceRepository.java`
+- ✅ Create: `backend/src/main/java/com/pod/repository/RateRepository.java`
 
-**Pattern:** Each repository extends `JpaRepository<T, Long>` plus custom `@Query` methods.
+**Implemented:**
 
-```java
-// backend/src/main/java/com/pod/repository/ResourceRepository.java
-@Repository
-public interface ResourceRepository extends JpaRepository<Resource, Long> {
+**ResourceRepository:**
+- `findByIdWithLock()` — PESSIMISTIC_WRITE lock for concurrent edits
+- `findByCostCenterAndTeam()` — filter by CC+BTC + active-only
+- `findByFilters()` — skill IN, level range, active+billable, paginated
 
-    @Lock(LockModeType.PESSIMISTIC_WRITE)
-    @Query("SELECT r FROM Resource r WHERE r.id = :id")
-    Optional<Resource> findByIdWithLock(@Param("id") Long id);
+**RateRepository:**
+- `findByCostCenterIdAndBillableTeamCodeAndEffectiveToIsNull()` — derived query with `@Lock(PESSIMISTIC_WRITE)` for locking active rate
 
-    @Query("SELECT r FROM Resource r WHERE r.costCenterId = :cc AND r.billableTeamCode = :btc AND r.isActive = true")
-    List<Resource> findByCostCenterAndTeam(@Param("cc") String costCenterId, @Param("btc") String billableTeamCode);
-
-    @Query("SELECT r FROM Resource r WHERE r.skill IN :skills AND r.level BETWEEN :min AND :max AND r.isActive = true AND r.isBillable = true")
-    Page<Resource> findByFilters(@Param("skills") List<String> skills, @Param("min") int minLevel, @Param("max") int maxLevel, Pageable pageable);
-}
-```
+**Pattern:** Each repository extends `JpaRepository<T, Long>` plus custom `@Query` and derived query methods.
 
 - [ ] Test: `ResourceRepositoryTest.java` uses `@DataJpaTest` + Testcontainers to verify query results.
 - [ ] Repeat for RateRepository (include `findActiveByCostCenterAndTeam`), ProjectRepository (with `findByIdWithLock`), AllocationRepository (with `sumApprovedHoursForActiveResource`, `countDistinctActiveProjectsInMonth`).
