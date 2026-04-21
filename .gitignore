@@ -42,3 +42,15 @@ redis_data/
 .pytest_cache/
 .coverage
 htmlcov/
+
+# Maven / Java build
+target/
+!.mvn/
+!.mvn/wrapper/MavenWrapper.*
+.mvn/
+.mvnw
+.mvnw.cmd
+*.log
+
+# Claude Code local settings (user-specific)
+.claude/settings.local.json
