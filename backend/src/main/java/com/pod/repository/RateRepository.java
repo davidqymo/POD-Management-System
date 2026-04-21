@@ -1,7 +1,9 @@
 package com.pod.repository;
 
 import com.pod.entity.Rate;
+import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.stereotype.Repository;
 
 import java.util.Optional;
@@ -17,7 +19,8 @@ public interface RateRepository extends JpaRepository<Rate, Long> {
 
     /**
      * Find the currently active (open-ended) rate for a cost center + team.
-     * There can be at most one active rate per (costCenterId, billableTeamCode).
+     * Acquires a PESSIMISTIC_WRITE lock to serialize concurrent rate updates.
      */
-    Optional<Rate> findActiveRate(String costCenterId, String billableTeamCode);
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    Optional<Rate> findByCostCenterIdAndBillableTeamCodeAndEffectiveToIsNull(String costCenterId, String billableTeamCode);
 }
