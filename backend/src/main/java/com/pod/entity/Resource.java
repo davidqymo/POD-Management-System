@@ -42,6 +42,7 @@ public class Resource {
     private String skill = "general";
 
     @Column(name = "level")
+    @Builder.Default
     private Integer level = 1;
 
     @Enumerated(EnumType.STRING)
@@ -56,6 +57,7 @@ public class Resource {
 
     @Version
     @Column(name = "version", nullable = false)
+    @Builder.Default
     private Integer version = 1;
 
     @Column(name = "created_at", nullable = false, updatable = false)
