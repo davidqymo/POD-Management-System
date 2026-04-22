@@ -9,7 +9,10 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.time.YearMonth;
 import java.time.format.DateTimeFormatter;
+import java.util.List;
 import java.util.Optional;
+
+import jakarta.persistence.EntityNotFoundException;
 
 /**
  * RateService — manages rate periods with contiguous month chains.
@@ -19,6 +22,8 @@ import java.util.Optional;
  * new effective_from date is exactly one month after the previous rate's
  * effective_from, closes the previous rate by setting effective_to, and
  * persists both with a single Optimistic Lock retry on conflict.
+ *
+ * T1.5: Added findAll(), findById(), findActiveRate() for REST API.
  *
  * Contiguity rule examples:
  *   prev = 202512; new = 202601 → OK (adjacent)
@@ -34,6 +39,32 @@ public class RateService {
 
     public RateService(RateRepository rateRepository) {
         this.rateRepository = rateRepository;
+    }
+
+    /**
+     * Find all rates.
+     */
+    @Transactional(readOnly = true)
+    public List<Rate> findAll() {
+        return rateRepository.findAll();
+    }
+
+    /**
+     * Find rate by ID.
+     */
+    @Transactional(readOnly = true)
+    public Optional<Rate> findById(Long id) {
+        return rateRepository.findById(id);
+    }
+
+    /**
+     * Find the currently active rate for a cost center and billable team code.
+     */
+    @Transactional(readOnly = true)
+    public Optional<Rate> findActiveRate(String costCenterId, String billableTeamCode) {
+        return rateRepository.findByCostCenterIdAndBillableTeamCodeAndEffectiveToIsNull(
+            costCenterId, billableTeamCode
+        );
     }
 
     /**

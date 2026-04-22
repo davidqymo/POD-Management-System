@@ -5,10 +5,14 @@ import com.pod.entity.ResourceStatus;
 import com.pod.exception.InvalidStatusTransitionException;
 import com.pod.repository.ResourceRepository;
 import jakarta.persistence.EntityManager;
+import jakarta.persistence.EntityNotFoundException;
 import jakarta.persistence.LockModeType;
 import jakarta.persistence.PersistenceContext;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+
+import java.util.List;
+import java.util.Optional;
 
 /**
  * ResourceService — business logic for Resource entity lifecycle.
@@ -16,6 +20,8 @@ import org.springframework.transaction.annotation.Transactional;
  * T1.4: changeStatus() applies guarded state transitions with PESSIMISTIC_WRITE
  * locking to prevent concurrent edits, validates via Resource.isValidTransition(),
  * and records audit changes (stubbed here; real AuditService wired in REFACTOR).
+ *
+ * T1.5: Added findAll(), findById(), create(), deactivate() for REST API.
  */
 @Service
 @Transactional
@@ -28,6 +34,44 @@ public class ResourceService {
 
     public ResourceService(ResourceRepository resourceRepository) {
         this.resourceRepository = resourceRepository;
+    }
+
+    /**
+     * Find all active resources.
+     */
+    @Transactional(readOnly = true)
+    public List<Resource> findAll() {
+        return resourceRepository.findAll();
+    }
+
+    /**
+     * Find resource by ID.
+     */
+    @Transactional(readOnly = true)
+    public Optional<Resource> findById(Long id) {
+        return resourceRepository.findById(id);
+    }
+
+    /**
+     * Create a new resource.
+     */
+    public Resource create(Resource resource) {
+        if (resource.getStatus() == null) {
+            resource.setStatus(ResourceStatus.ACTIVE);
+        }
+        return resourceRepository.save(resource);
+    }
+
+    /**
+     * Soft delete (deactivate) a resource.
+     */
+    public void deactivate(Long id) {
+        Resource resource = entityManager.find(Resource.class, id, LockModeType.PESSIMISTIC_WRITE);
+        if (resource == null) {
+            throw new EntityNotFoundException("Resource not found: " + id);
+        }
+        resource.setActive(false);
+        resourceRepository.save(resource);
     }
 
     /**
