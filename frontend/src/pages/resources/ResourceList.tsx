@@ -2,7 +2,8 @@ import { useState, useEffect, useMemo, useCallback } from 'react'
 import { FiSearch, FiPlus, FiDownload, FiX } from 'react-icons/fi'
 import DataTable from '../../components/common/DataTable'
 import ImportModal from '../../components/modals/ImportModal'
-import type { Resource } from '../../types'
+import { useResources } from '../../hooks/useResources'
+import type { Resource, ResourceFilters } from '../../types'
 
 /* ─── Helpers ─────────────────────────────────────────── */
 
@@ -94,18 +95,7 @@ export default function ResourceList() {
   const [skill, setSkill] = useState('')
   const [costCenter, setCostCenter] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
-  const [data, setData] = useState<Resource[]>([])
-  const [loading, setLoading] = useState(true)
   const [showImport, setShowImport] = useState(false)
-
-  // Simulated fetch — replace with hook when backend is ready
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setData([])
-      setLoading(false)
-    }, 400)
-    return () => clearTimeout(timer)
-  }, [])
 
   // Debounced search
   const [debouncedSearch, setDebouncedSearch] = useState(search)
@@ -114,7 +104,8 @@ export default function ResourceList() {
     return () => clearTimeout(timer)
   }, [search])
 
-  const filters = useMemo(
+  // Build filters for the API query
+  const filters: ResourceFilters = useMemo(
     () => ({
       search: debouncedSearch || undefined,
       skill: skill || undefined,
@@ -124,23 +115,8 @@ export default function ResourceList() {
     [debouncedSearch, skill, costCenter, statusFilter],
   )
 
-  // Filtered data (client-side for now)
-  const filtered = useMemo(() => {
-    let result = [...data]
-    if (filters.search) {
-      const q = filters.search.toLowerCase()
-      result = result.filter(
-        (r) =>
-          r.name.toLowerCase().includes(q) ||
-          r.externalId.toLowerCase().includes(q) ||
-          r.costCenterId.toLowerCase().includes(q),
-      )
-    }
-    if (filters.skill) result = result.filter((r) => r.skill === filters.skill)
-    if (filters.costCenter) result = result.filter((r) => r.costCenterId === filters.costCenter)
-    if (filters.status) result = result.filter((r) => r.status === filters.status)
-    return result
-  }, [data, filters])
+  // TanStack Query — data fetched from backend via useResources hook
+  const { data: resources = [], isLoading } = useResources(filters)
 
   const handleReset = useCallback(() => {
     setSearch('')
@@ -219,7 +195,7 @@ export default function ResourceList() {
         <div>
           <h1 className="text-xl font-bold tracking-tight text-gray-900">Resources</h1>
           <p className="mt-0.5 text-sm text-gray-500">
-            {filtered.length} {filtered.length === 1 ? 'resource' : 'resources'} in the system
+            {isLoading ? 'Loading...' : `${resources.length} ${resources.length === 1 ? 'resource' : 'resources'} in the system`}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -304,8 +280,8 @@ export default function ResourceList() {
       {/* Table */}
       <DataTable
         columns={columns}
-        data={filtered}
-        isLoading={loading}
+        data={resources}
+        isLoading={isLoading}
         emptyMessage="No resources found matching your filters."
       />
 
