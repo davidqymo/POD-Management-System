@@ -90,7 +90,6 @@ spring:
   jackson:
     serialization:
       write-dates-as-timestamps: false
-    date-format: com.pod.config.ISO8601DateFormat
     default-property-inclusion: non_null
 
   cache:
@@ -161,17 +160,18 @@ spring:
     show-sql: true
 
   flyway:
-    enabled: true
-    locations: classpath:db/migration
+    enabled: false   # H2 tests use Hibernate ddl-auto; Flyway migrations require PostgreSQL
 
-  data:
-    redis:
-      host: localhost
-      port: 6379
+  autoconfigure:
+    exclude:
+      - org.springframework.boot.autoconfigure.data.redis.RedisAutoConfiguration
+      - org.springframework.boot.autoconfigure.data.redis.RedisRepositoriesAutoConfiguration
 
   cache:
     type: none
 ```
+
+Note: `application-test.yml` is for H2-based unit tests (`@DataJpaTest`, `@WebMvcTest`). Integration tests (`*IT.java`) use `AbstractIntegrationTest` which dynamically configures Testcontainers PostgreSQL and provides its own property overrides.
 
 ### Jackson date config
 
