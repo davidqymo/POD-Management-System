@@ -7,6 +7,9 @@ import com.pod.repository.ResourceRepository;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.LockModeType;
 import jakarta.persistence.PersistenceContext;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -28,6 +31,33 @@ public class ResourceService {
 
     public ResourceService(ResourceRepository resourceRepository) {
         this.resourceRepository = resourceRepository;
+    }
+
+    @Transactional(readOnly = true)
+    public Page<Resource> findAllWithFilters(String search, String skill, String costCenter, String status, Pageable pageable) {
+        Specification<Resource> spec = Specification.where(null);
+
+        if (search != null && !search.isBlank()) {
+            spec = spec.and((root, query, cb) ->
+                cb.or(
+                    cb.like(cb.lower(root.get("name")), "%" + search.toLowerCase() + "%"),
+                    cb.like(cb.lower(root.get("externalId")), "%" + search.toLowerCase() + "%"),
+                    cb.like(cb.lower(root.get("costCenterId")), "%" + search.toLowerCase() + "%")
+                )
+            );
+        }
+        if (skill != null && !skill.isBlank()) {
+            spec = spec.and((root, query, cb) -> cb.equal(root.get("skill"), skill));
+        }
+        if (costCenter != null && !costCenter.isBlank()) {
+            spec = spec.and((root, query, cb) -> cb.equal(root.get("costCenterId"), costCenter));
+        }
+        if (status != null && !status.isBlank()) {
+            spec = spec.and((root, query, cb) -> cb.equal(root.get("status"), ResourceStatus.valueOf(status)));
+        }
+        spec = spec.and((root, query, cb) -> cb.isTrue(root.get("isActive")));
+
+        return resourceRepository.findAll(spec, pageable);
     }
 
     /**
