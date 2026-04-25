@@ -12,9 +12,11 @@ test.describe('Rate CRUD', () => {
   });
 
   test('create rate with contiguity validation', async ({ request }) => {
+    // Use short unique IDs to avoid exceeding column limits (varchar 20)
+    const uniqueId = `E2E-${Date.now() % 100000}`;
     const first = await request.post(`${API_BASE}/rates`, {
       data: {
-        costCenterId: 'E2E-CC',
+        costCenterId: uniqueId,
         billableTeamCode: 'E2E-BTC',
         monthlyRateK: 5.00,
         effectiveFrom: '202601',
@@ -28,7 +30,7 @@ test.describe('Rate CRUD', () => {
 
     const second = await request.post(`${API_BASE}/rates`, {
       data: {
-        costCenterId: 'E2E-CC',
+        costCenterId: uniqueId,
         billableTeamCode: 'E2E-BTC',
         monthlyRateK: 5.50,
         effectiveFrom: '202602',
@@ -37,16 +39,21 @@ test.describe('Rate CRUD', () => {
     });
     expect(second.ok()).toBeTruthy();
 
-    const firstRateCheck = await request.get(`${API_BASE}/rates/${firstRate.id}`);
-    const firstRateUpdated = await firstRateCheck.json();
-    expect(firstRateUpdated.effectiveTo).toBe('202601');
+    // Verify via list endpoint - find the first rate and check effectiveTo
+    const listResp = await request.get(`${API_BASE}/rates`);
+    const rates = await listResp.json();
+    const firstRateCheck = rates.find((r: any) => r.id === firstRate.id);
+    expect(firstRateCheck.effectiveTo).toBe('202601');
   });
 
   test('rate gap detection returns error', async ({ request }) => {
+    // Use short unique IDs + unique billableTeamCode to avoid exceeding column limits (varchar 20)
+    const uniqueId = `EG${Date.now() % 100000}`;
+    const btc = `EGAP${Date.now() % 10000}`;
     await request.post(`${API_BASE}/rates`, {
       data: {
-        costCenterId: 'E2E-GAP-CC',
-        billableTeamCode: 'E2E-GAP-BTC',
+        costCenterId: uniqueId,
+        billableTeamCode: btc,
         monthlyRateK: 4.00,
         effectiveFrom: '202601',
         billable: true,
@@ -55,8 +62,8 @@ test.describe('Rate CRUD', () => {
 
     const gapResp = await request.post(`${API_BASE}/rates`, {
       data: {
-        costCenterId: 'E2E-GAP-CC',
-        billableTeamCode: 'E2E-GAP-BTC',
+        costCenterId: uniqueId,
+        billableTeamCode: btc,
         monthlyRateK: 4.50,
         effectiveFrom: '202603',
         billable: true,
