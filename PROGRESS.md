@@ -98,6 +98,24 @@ All major decisions documented in `doc/PRODUCT_REQUIREMENTS.md` (v1.5). PRD upda
 - [x] **Sprint 1: Task T1.6 — Frontend** (Resource List + CSV Import)
   - Status: ✅ COMPLETE (18 Vitest tests passing — ResourceList, ImportModal, DataTable)
 
+- [x] **Sprint 2: Task T2.1 — Project Entity + Migration** (V3)
+  - Status: ✅ COMPLETE (Project JPA entity, Activity JPA entity, ActivityDependency composite key, V3 Flyway migration)
+
+- [x] **Sprint 2: Task T2.2 — Project Repository Layer**
+  - Status: ✅ COMPLETE (ProjectRepository, ActivityRepository, ActivityDependencyRepository with custom queries)
+
+- [x] **Sprint 2: Task T2.3 — Project Service Layer** (ProjectService + GanttService)
+  - Status: ✅ COMPLETE (ProjectService with terminal state guard + 30-day reactivation, GanttService with critical path calculation using Kahn's topological sort + forward/backward pass)
+
+- [x] **Sprint 2: Task T2.4 — Project Controller Layer** (REST APIs)
+  - Status: ✅ COMPLETE (ProjectController with CRUD, status transitions, /gantt endpoint)
+
+- [x] **Sprint 2: Task T2.5 — Frontend** (Project List + Gantt Chart)
+  - Status: ✅ COMPLETE (projects.ts API client, ProjectList.tsx with pagination, GanttChart.tsx using gantt-task-react)
+
+- [ ] **Sprint 3: Task T3.1 — Allocation Entity + Migration** (V4)
+  - Status: PENDING
+
 - [x] **Integration Test Infrastructure** — Docker Compose + Spring config + SecurityConfig + E2E
   - Status: ✅ COMPLETE
   - Docker Compose: PostgreSQL 15 + Redis 7 (`infra/docker-compose.yml`)
