@@ -3,6 +3,8 @@ package com.pod.controller;
 import com.pod.entity.Project;
 import com.pod.entity.ProjectStatus;
 import com.pod.service.ProjectService;
+import com.pod.dto.response.GanttResponse;
+import com.pod.service.GanttService;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -16,9 +18,11 @@ import java.util.Map;
 public class ProjectController {
 
     private final ProjectService projectService;
+    private final GanttService ganttService;
 
-    public ProjectController(ProjectService projectService) {
+    public ProjectController(ProjectService projectService, GanttService ganttService) {
         this.projectService = projectService;
+        this.ganttService = ganttService;
     }
 
     @GetMapping
@@ -98,6 +102,16 @@ public class ProjectController {
             return ResponseEntity.noContent().build();
         } catch (IllegalArgumentException e) {
             return ResponseEntity.notFound().build();
+        }
+    }
+
+    @GetMapping("/{id}/gantt")
+    public ResponseEntity<?> getGantt(@PathVariable Long id) {
+        try {
+            GanttResponse gantt = ganttService.calculateCriticalPath(id);
+            return ResponseEntity.ok(gantt);
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
         }
     }
 
