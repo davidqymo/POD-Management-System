@@ -16,7 +16,14 @@
       "Bash(xargs -I{} sh -c 'echo \"=== {} ===\"; sed -n \"1,200p\" \"D:/projects/POD Team Management System/backend/target/surefire-reports/{}\"')",
       "Bash(rm -rf \"D:/projects/POD Team Management System/backend/target\")",
       "Bash(mkdir -p \"D:/projects/POD Team Management System/backend/src/main/java/com/pod/service\")",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(git push:*)",
+      "Bash(git:*)",
+      "mcp__plugin_playwright_playwright__browser_navigate",
+      "Bash(npx tsc *)",
+      "Bash(npm ci:*)",
+      "Bash(npx vitest:*)",
+      "Bash(npx vite:*)"
     ]
   }
 }
