@@ -1,6 +1,6 @@
 # POD Team Management System — Progress Log
 
-> **Last Updated:** 2026-04-19
+> **Last Updated:** 2026-04-25
 > **Current Branch:** main
 > **Current Phase:** Phase 2 — Implementation (ready to start)
 
@@ -95,8 +95,16 @@ All major decisions documented in `doc/PRODUCT_REQUIREMENTS.md` (v1.5). PRD upda
   - Status: PENDING
   - Next: ResourceController + RateController with CRUD endpoints
 
-- [ ] **Sprint 1: Task T1.6 — Frontend** (Resource List + CSV Import)
-  - Status: PENDING
+- [x] **Sprint 1: Task T1.6 — Frontend** (Resource List + CSV Import)
+  - Status: ✅ COMPLETE (18 Vitest tests passing — ResourceList, ImportModal, DataTable)
+
+- [x] **Integration Test Infrastructure** — Docker Compose + Spring config + SecurityConfig + E2E
+  - Status: ✅ COMPLETE
+  - Docker Compose: PostgreSQL 15 + Redis 7 (`infra/docker-compose.yml`)
+  - Spring Boot: `application.yml` + `application-dev.yml` + `application-test.yml`
+  - SecurityConfig: permissive (permit all) — real JWT auth in Sprint 5
+  - ResourceController: filter params + pagination (matches frontend expectations)
+  - E2E: 8 Playwright scenarios (Resource CRUD x5, Rate CRUD x3)
 
 ---
 
