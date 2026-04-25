@@ -20,7 +20,13 @@ class SecurityConfigTest {
 
     @Test
     void unauthenticatedRequest_permitted() throws Exception {
+        // SecurityConfig allows all requests without auth — verify we don't get 401/403
         mockMvc.perform(get("/api/v1/resources"))
-            .andExpect(status().isNotFound()); // Endpoint doesn't exist yet, but request is permitted
+            .andExpect(result -> {
+                int status = result.getResponse().getStatus();
+                if (status == 401 || status == 403) {
+                    throw new AssertionError("Expected request to be permitted, got " + status);
+                }
+            });
     }
 }
