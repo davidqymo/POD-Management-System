@@ -5,6 +5,10 @@ import com.pod.entity.ProjectStatus;
 import com.pod.service.ProjectService;
 import com.pod.dto.response.GanttResponse;
 import com.pod.service.GanttService;
+import com.pod.exception.TerminalStateException;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -26,17 +30,11 @@ public class ProjectController {
     }
 
     @GetMapping
-    public ResponseEntity<List<Project>> getAll(
+    public ResponseEntity<?> getAll(
             @RequestParam(required = false) String status,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
-        List<Project> projects;
-        if (status != null && !status.isBlank()) {
-            ProjectStatus statusEnum = ProjectStatus.valueOf(status);
-            projects = projectService.findByStatus(statusEnum);
-        } else {
-            projects = projectService.findAll();
-        }
+        Page<Project> projects = projectService.findAll(PageRequest.of(page, size, Sort.by("createdAt").descending()));
         return ResponseEntity.ok(projects);
     }
 
@@ -111,6 +109,36 @@ public class ProjectController {
             GanttResponse gantt = ganttService.calculateCriticalPath(id);
             return ResponseEntity.ok(gantt);
         } catch (Exception e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        }
+    }
+
+    @PostMapping("/{id}/start")
+    public ResponseEntity<?> startProject(@PathVariable Long id) {
+        try {
+            Project started = projectService.startProject(id);
+            return ResponseEntity.ok(toResponse(started));
+        } catch (IllegalStateException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        }
+    }
+
+    @PostMapping("/{id}/hold")
+    public ResponseEntity<?> putOnHold(@PathVariable Long id) {
+        try {
+            Project held = projectService.putOnHold(id);
+            return ResponseEntity.ok(toResponse(held));
+        } catch (IllegalStateException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        }
+    }
+
+    @PostMapping("/{id}/reactivate")
+    public ResponseEntity<?> reactivateProject(@PathVariable Long id) {
+        try {
+            Project reactivated = projectService.reactivateCancelledProject(id);
+            return ResponseEntity.ok(toResponse(reactivated));
+        } catch (TerminalStateException | IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
         }
     }

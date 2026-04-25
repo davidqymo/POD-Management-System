@@ -53,4 +53,34 @@ public class ActivityController {
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
         }
     }
+
+    @PostMapping("/dependencies")
+    public ResponseEntity<?> addDependency(
+            @PathVariable Long projectId,
+            @RequestBody Map<String, Object> payload) {
+        try {
+            Long predecessorId = ((Number) payload.get("predecessorId")).longValue();
+            Long successorId = ((Number) payload.get("successorId")).longValue();
+            String dependencyType = (String) payload.getOrDefault("dependencyType", "FS");
+
+            var dep = activityService.addDependency(predecessorId, successorId, dependencyType);
+            return ResponseEntity.status(HttpStatus.CREATED).body(dep);
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        }
+    }
+
+    @DeleteMapping("/dependencies")
+    public ResponseEntity<?> removeDependency(
+            @PathVariable Long projectId,
+            @RequestBody Map<String, Object> payload) {
+        try {
+            Long predecessorId = ((Number) payload.get("predecessorId")).longValue();
+            Long successorId = ((Number) payload.get("successorId")).longValue();
+            activityService.removeDependency(predecessorId, successorId);
+            return ResponseEntity.noContent().build();
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        }
+    }
 }

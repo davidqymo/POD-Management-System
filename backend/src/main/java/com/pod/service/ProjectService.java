@@ -4,6 +4,8 @@ import com.pod.entity.Project;
 import com.pod.entity.ProjectStatus;
 import com.pod.exception.TerminalStateException;
 import com.pod.repository.ProjectRepository;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -28,6 +30,11 @@ public class ProjectService {
     @Transactional(readOnly = true)
     public List<Project> findAll() {
         return projectRepository.findByIsActiveTrue();
+    }
+
+    @Transactional(readOnly = true)
+    public Page<Project> findAll(Pageable pageable) {
+        return projectRepository.findByIsActiveTrue(pageable);
     }
 
     @Transactional(readOnly = true)
@@ -89,6 +96,31 @@ public class ProjectService {
         }
 
         project.setStatus(newStatus);
+        return projectRepository.save(project);
+    }
+
+    public Project startProject(Long id) {
+        Project project = projectRepository.findByIdAndIsActiveTrue(id)
+            .orElseThrow(() -> new IllegalArgumentException("Project not found: " + id));
+
+        // Only REQUESTED or ON_HOLD can be started
+        if (project.getStatus() != ProjectStatus.REQUESTED && project.getStatus() != ProjectStatus.ON_HOLD) {
+            throw new IllegalStateException("Project cannot be started from status: " + project.getStatus());
+        }
+
+        project.setStatus(ProjectStatus.EXECUTING);
+        return projectRepository.save(project);
+    }
+
+    public Project putOnHold(Long id) {
+        Project project = projectRepository.findByIdAndIsActiveTrue(id)
+            .orElseThrow(() -> new IllegalArgumentException("Project not found: " + id));
+
+        if (project.getStatus() != ProjectStatus.EXECUTING) {
+            throw new IllegalStateException("Only EXECUTING projects can be put on hold");
+        }
+
+        project.setStatus(ProjectStatus.ON_HOLD);
         return projectRepository.save(project);
     }
 
