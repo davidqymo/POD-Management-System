@@ -1,14 +1,15 @@
 import { defineConfig, devices } from '@playwright/test';
 
 export default defineConfig({
-  testDir: './spec',
-  fullyParallel: true,
+  testDir: './specs',
+  fullyParallel: false,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
-  workers: process.env.CI ? 1 : undefined,
+  workers: 1,
   reporter: 'html',
+  timeout: 30000,
   use: {
-    baseURL: process.env.FRONTEND_URL || 'http://localhost:5173',
+    baseURL: 'http://localhost:5173',
     trace: 'on-first-retry',
   },
   projects: [
@@ -17,9 +18,18 @@ export default defineConfig({
       use: { ...devices['Desktop Chrome'] },
     },
   ],
-  webServer: {
-    command: 'npm run preview --prefix ../',  // assumes frontend package.json exists
-    port: 4173,
-    reuseExistingServer: !process.env.CI,
-  },
+  webServer: [
+    {
+      command: 'cd ../../backend && mvn spring-boot:run -Dspring-boot.run.profiles=dev',
+      port: 8080,
+      reuseExistingServer: true,
+      timeout: 120000,
+    },
+    {
+      command: 'cd .. && npm run dev',
+      port: 5173,
+      reuseExistingServer: true,
+      timeout: 60000,
+    },
+  ],
 });
