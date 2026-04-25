@@ -1,5 +1,5 @@
 import client from './client'
-import type { Resource, ResourceFilters } from '../types'
+import type { Resource, ResourceFilters, PaginatedResponse } from '../types'
 
 export function getResources(filters: ResourceFilters = {}) {
   const params = new URLSearchParams()
@@ -10,7 +10,7 @@ export function getResources(filters: ResourceFilters = {}) {
   if (filters.page !== undefined) params.set('page', String(filters.page))
   if (filters.size !== undefined) params.set('size', String(filters.size))
 
-  return client.get<Resource[]>(`/resources?${params.toString()}`).then((r) => r.data)
+  return client.get<PaginatedResponse<Resource>>(`/resources?${params.toString()}`).then((r) => r.data)
 }
 
 export function getResourceById(id: number) {

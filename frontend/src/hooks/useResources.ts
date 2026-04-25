@@ -5,7 +5,10 @@ import type { ResourceFilters } from '../types'
 export function useResources(filters: ResourceFilters = {}) {
   return useQuery({
     queryKey: ['resources', filters],
-    queryFn: () => getResources(filters),
+    queryFn: async () => {
+      const response = await getResources(filters)
+      return response.content
+    },
   })
 }
 
