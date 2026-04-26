@@ -2,6 +2,7 @@ package com.pod.controller;
 
 import com.pod.entity.Project;
 import com.pod.entity.ProjectStatus;
+import com.pod.repository.ProjectRepository;
 import com.pod.service.ProjectService;
 import com.pod.dto.response.GanttResponse;
 import com.pod.service.GanttService;
@@ -12,6 +13,7 @@ import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import java.time.LocalDate;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -21,10 +23,12 @@ import java.util.Map;
 public class ProjectController {
 
     private final ProjectService projectService;
+    private final ProjectRepository projectRepository;
     private final GanttService ganttService;
 
-    public ProjectController(ProjectService projectService, GanttService ganttService) {
+    public ProjectController(ProjectService projectService, ProjectRepository projectRepository, GanttService ganttService) {
         this.projectService = projectService;
+        this.projectRepository = projectRepository;
         this.ganttService = ganttService;
     }
 
@@ -47,11 +51,49 @@ public class ProjectController {
             Object budget = payload.get("budgetTotalK");
             Long ownerUserId = payload.get("ownerUserId") != null ? ((Number) payload.get("ownerUserId")).longValue() : null;
             String description = (String) payload.get("description");
+            String requestId = (String) payload.get("requestId");
+            String clarityId = (String) payload.get("clarityId");
+            String billableProductId = (String) payload.get("billableProductId");
+            String status = (String) payload.get("status");
+            String startDate = (String) payload.get("startDate");
+            String endDate = (String) payload.get("endDate");
+
+            if (name == null || name.isBlank()) {
+                return ResponseEntity.badRequest().body(Map.of("error", "Project name is required"));
+            }
+
+            if (budget == null) {
+                return ResponseEntity.badRequest().body(Map.of("error", "Budget is required"));
+            }
+
             java.math.BigDecimal budgetK = new java.math.BigDecimal(budget.toString());
-            Project created = projectService.create(name, budgetK, ownerUserId, description);
+
+            // Parse dates
+            java.time.LocalDate start = startDate != null && !startDate.isBlank() ?
+                java.time.LocalDate.parse(startDate) : null;
+            java.time.LocalDate end = endDate != null && !endDate.isBlank() ?
+                java.time.LocalDate.parse(endDate) : null;
+
+            // First create the project with core fields
+            Project created = projectService.create(name, budgetK, ownerUserId, description,
+                requestId, clarityId, billableProductId, start, end);
+
+            // Handle status separately
+            if (status != null && !status.isBlank()) {
+                try {
+                    ProjectStatus projectStatus = ProjectStatus.valueOf(status);
+                    created.setStatus(projectStatus);
+                    created = projectRepository.saveAndFlush(created);
+                } catch (IllegalArgumentException e) {
+                    // ignore invalid status
+                }
+            }
+
             return ResponseEntity.status(HttpStatus.CREATED).body(toResponse(created));
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        } catch (Exception e) {
+            return ResponseEntity.status(500).body(Map.of("error", "Failed to create project: " + e.getMessage()));
         }
     }
 
@@ -61,10 +103,17 @@ public class ProjectController {
             String name = (String) payload.get("name");
             java.math.BigDecimal budgetK = payload.get("budgetTotalK") != null ? new java.math.BigDecimal(payload.get("budgetTotalK").toString()) : null;
             String description = (String) payload.get("description");
-            Project updated = projectService.update(id, name, budgetK, description);
+            String requestId = (String) payload.get("requestId");
+            String clarityId = (String) payload.get("clarityId");
+            String billableProductId = (String) payload.get("billableProductId");
+            LocalDate startDate = payload.get("startDate") != null ? LocalDate.parse(payload.get("startDate").toString()) : null;
+            LocalDate endDate = payload.get("endDate") != null ? LocalDate.parse(payload.get("endDate").toString()) : null;
+            Project updated = projectService.update(id, name, budgetK, description, requestId, clarityId, billableProductId, startDate, endDate);
             return ResponseEntity.ok(toResponse(updated));
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        } catch (Exception e) {
+            return ResponseEntity.status(500).body(Map.of("error", "Failed to update project: " + e.getMessage()));
         }
     }
 
@@ -131,6 +180,7 @@ public class ProjectController {
         response.put("id", project.getId());
         response.put("requestId", project.getRequestId());
         response.put("clarityId", project.getClarityId());
+        response.put("billableProductId", project.getBillableProductId());
         response.put("name", project.getName());
         response.put("description", project.getDescription());
         response.put("budgetTotalK", project.getBudgetTotalK());

@@ -4,12 +4,14 @@ import com.pod.entity.Project;
 import com.pod.entity.ProjectStatus;
 import com.pod.exception.TerminalStateException;
 import com.pod.repository.ProjectRepository;
+import jakarta.persistence.EntityManager;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Optional;
@@ -20,9 +22,11 @@ public class ProjectService {
 
     private static final int REACTIVATE_DAYS_LIMIT = 30;
     private final ProjectRepository projectRepository;
+    private final EntityManager entityManager;
 
-    public ProjectService(ProjectRepository projectRepository) {
+    public ProjectService(ProjectRepository projectRepository, EntityManager entityManager) {
         this.projectRepository = projectRepository;
+        this.entityManager = entityManager;
     }
 
     @Transactional(readOnly = true)
@@ -45,23 +49,69 @@ public class ProjectService {
         return projectRepository.findByStatusAndIsActiveTrue(status);
     }
 
-    public Project create(String name, BigDecimal budgetTotalK, Long ownerUserId, String description) {
+    public Project create(String name, BigDecimal budgetTotalK, Long ownerUserId, String description,
+                       String requestId, String clarityId, String billableProductId,
+                       LocalDate startDate, LocalDate endDate) {
         if (budgetTotalK == null || budgetTotalK.compareTo(BigDecimal.ZERO) <= 0) {
             throw new IllegalArgumentException("Budget must be greater than zero");
         }
-        Project project = Project.builder()
-            .name(name).budgetTotalK(budgetTotalK).ownerUserId(ownerUserId)
-            .description(description).status(ProjectStatus.REQUESTED).isActive(true).build();
-        return projectRepository.save(project);
+
+        // Create basic project with JPA - this works for most fields
+        Project project = new Project();
+        project.setName(name);
+        project.setBudgetTotalK(budgetTotalK);
+        project.setOwnerUserId(ownerUserId);
+        project.setOwnerId(ownerUserId);
+        project.setDescription(description);
+        project.setStatus(ProjectStatus.REQUESTED);
+        project.setActive(true);
+        project.setCreatedBy(1L);
+        project.setRequestId(requestId);
+        project.setStartDate(startDate);
+        project.setEndDate(endDate);
+
+        Project saved = projectRepository.save(project);
+        entityManager.flush();
+        entityManager.clear();
+
+        // Now update clarityId and billableProductId with separate UPDATE via repository
+        if (clarityId != null && !clarityId.isBlank() || billableProductId != null && !billableProductId.isBlank()) {
+            String clar = (clarityId != null && !clarityId.isBlank()) ? clarityId : null;
+            String prod = (billableProductId != null && !billableProductId.isBlank()) ? billableProductId : null;
+            projectRepository.updateClarityAndProductIds(saved.getId(), clar, prod);
+
+            entityManager.flush();
+            entityManager.clear();
+        }
+
+        // Re-fetch to get complete data
+        return projectRepository.findById(saved.getId()).orElse(saved);
     }
 
-    public Project update(Long id, String name, BigDecimal budgetTotalK, String description) {
+    // Overload for 4-parameter calls (used by tests)
+    public Project create(String name, BigDecimal budgetTotalK, Long ownerUserId, String description) {
+        return create(name, budgetTotalK, ownerUserId, description, null, null, null, null, null);
+    }
+
+    public Project update(Long id, String name, BigDecimal budgetTotalK, String description,
+                       String requestId, String clarityId, String billableProductId,
+                       LocalDate startDate, LocalDate endDate) {
         Project project = projectRepository.findByIdAndIsActiveTrue(id)
             .orElseThrow(() -> new IllegalArgumentException("Project not found: " + id));
         if (name != null && !name.isBlank()) project.setName(name);
         if (budgetTotalK != null && budgetTotalK.compareTo(BigDecimal.ZERO) > 0) project.setBudgetTotalK(budgetTotalK);
         if (description != null) project.setDescription(description);
+        if (requestId != null) project.setRequestId(requestId.isBlank() ? null : requestId);
+        if (clarityId != null) project.setClarityId(clarityId.isBlank() ? null : clarityId);
+        if (billableProductId != null) project.setBillableProductId(billableProductId.isBlank() ? null : billableProductId);
+        if (startDate != null) project.setStartDate(startDate);
+        if (endDate != null) project.setEndDate(endDate);
         return projectRepository.save(project);
+    }
+
+    // Overload for existing 4-parameter calls
+    public Project update(Long id, String name, BigDecimal budgetTotalK, String description) {
+        return update(id, name, budgetTotalK, description, null, null, null, null, null);
     }
 
     public Project transitionToTerminal(Long id, ProjectStatus newStatus) {

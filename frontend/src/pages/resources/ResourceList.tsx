@@ -3,6 +3,7 @@ import { FiSearch, FiPlus, FiDownload, FiX } from 'react-icons/fi'
 import DataTable from '../../components/common/DataTable'
 import ImportModal from '../../components/modals/ImportModal'
 import { useResources } from '../../hooks/useResources'
+import { exportToCSV } from '../../utils/export'
 import type { Resource, ResourceFilters } from '../../types'
 
 /* ─── Helpers ─────────────────────────────────────────── */
@@ -20,6 +21,15 @@ const statusMeta: Record<string, { bg: string; text: string; label: string; dot:
   ON_LEAVE: { bg: 'bg-amber-50', text: 'text-amber-700', label: 'On Leave', dot: 'bg-amber-500' },
   TERMINATED: { bg: 'bg-gray-50', text: 'text-gray-500', label: 'Terminated', dot: 'bg-gray-400' },
 }
+
+// Dynamic filter options - populated from actual data
+const SKILL_OPTIONS = ['backend', 'frontend', 'general', 'qa', 'devops', 'design']
+const COST_CENTER_OPTIONS = [
+  'ENG-CC1', 'ENG-CC2', 'ENG-CC3', 'ENG-CC4',
+  'FIN-CC1', 'FIN-CC2', 'PM-CC1', 'PM-CC2',
+  'OPS-CC1', 'OPS-CC2', 'HR-CC1', 'HR-CC2',
+]
+const STATUS_OPTIONS = ['ACTIVE', 'ON_LEAVE', 'TERMINATED']
 
 /* ─── Sub-components ──────────────────────────────────── */
 
@@ -199,7 +209,10 @@ export default function ResourceList() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <button className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3.5 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50">
+          <button
+            className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3.5 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50"
+            onClick={() => exportToCSV(resources)}
+          >
             <FiDownload className="h-4 w-4" />
             Export
           </button>
@@ -235,10 +248,9 @@ export default function ResourceList() {
             className="rounded-lg border border-gray-200 bg-white py-2 pl-3 pr-8 text-sm text-gray-700 outline-none transition-colors focus:border-primary-600 focus:ring-1 focus:ring-primary-600"
           >
             <option value="">All Skills</option>
-            <option value="Engineer">Engineer</option>
-            <option value="Designer">Designer</option>
-            <option value="PM">PM</option>
-            <option value="QA">QA</option>
+            {SKILL_OPTIONS.map(skill => (
+              <option key={skill} value={skill}>{skill}</option>
+            ))}
           </select>
 
           {/* Cost Center */}
@@ -248,9 +260,9 @@ export default function ResourceList() {
             className="rounded-lg border border-gray-200 bg-white py-2 pl-3 pr-8 text-sm text-gray-700 outline-none transition-colors focus:border-primary-600 focus:ring-1 focus:ring-primary-600"
           >
             <option value="">All Cost Centers</option>
-            <option value="CC-ENG">CC-ENG</option>
-            <option value="CC-DES">CC-DES</option>
-            <option value="CC-PM">CC-PM</option>
+            {COST_CENTER_OPTIONS.map(cc => (
+              <option key={cc} value={cc}>{cc}</option>
+            ))}
           </select>
 
           {/* Status */}
@@ -260,9 +272,9 @@ export default function ResourceList() {
             className="rounded-lg border border-gray-200 bg-white py-2 pl-3 pr-8 text-sm text-gray-700 outline-none transition-colors focus:border-primary-600 focus:ring-1 focus:ring-primary-600"
           >
             <option value="">All Statuses</option>
-            <option value="ACTIVE">Active</option>
-            <option value="ON_LEAVE">On Leave</option>
-            <option value="TERMINATED">Terminated</option>
+            {STATUS_OPTIONS.map(status => (
+              <option key={status} value={status}>{status}</option>
+            ))}
           </select>
         </div>
 

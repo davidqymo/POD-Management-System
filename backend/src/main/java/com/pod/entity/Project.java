@@ -20,23 +20,26 @@ public class Project {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(name = "request_id", length = 20)
+    @Column(name = "request_id", length = 50)
     private String requestId;
 
-    @Column(name = "clarity_id", length = 20)
+    @Column(name = "clarity_id", length = 50)
     private String clarityId;
+
+    @Column(name = "billable_product_id", length = 50)
+    private String billableProductId;
 
     @Column(name = "name", nullable = false, length = 200)
     private String name;
 
-    @Column(name = "description", length = 2000)
+    @Column(name = "description", columnDefinition = "text")
     private String description;
 
+    @JsonProperty("budgetTotalK")
     @Column(name = "budget_total_k", nullable = false, precision = 10, scale = 2)
-    @Builder.Default
-    private BigDecimal budgetTotalK = BigDecimal.ZERO;
+    private BigDecimal budgetTotalK;
 
-    @Column(name = "budget_monthly_breakdown", columnDefinition = "JSONB")
+    @Column(name = "budget_monthly_breakdown", columnDefinition = "text")
     private String budgetMonthlyBreakdown;
 
     @Enumerated(EnumType.STRING)
@@ -52,6 +55,12 @@ public class Project {
 
     @Column(name = "owner_user_id")
     private Long ownerUserId;
+
+    @Column(name = "owner_id")
+    private Long ownerId;
+
+    @Column(name = "created_by")
+    private Long createdBy;
 
     @Column(name = "created_by_user_id")
     private Long createdByUserId;
@@ -76,6 +85,7 @@ public class Project {
     @PrePersist
     public void prePersist() {
         if (createdAt == null) createdAt = Instant.now();
+        if (budgetTotalK == null) budgetTotalK = BigDecimal.ZERO;
         updatedAt = Instant.now();
     }
 
