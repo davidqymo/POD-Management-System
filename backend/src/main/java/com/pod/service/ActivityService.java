@@ -36,9 +36,9 @@ public class ActivityService {
         if (payload.get("plannedStartDate") != null) activity.setPlannedStartDate(LocalDate.parse((String) payload.get("plannedStartDate")));
         if (payload.get("plannedEndDate") != null) activity.setPlannedEndDate(LocalDate.parse((String) payload.get("plannedEndDate")));
         if (payload.get("estimatedHours") != null) activity.setEstimatedHours(new BigDecimal(payload.get("estimatedHours").toString()));
-        if (payload.get("isMilestone") != null) activity.setIsMilestone((Boolean) payload.get("isMilestone"));
+        if (payload.get("isMilestone") != null) activity.setMilestone(Boolean.TRUE.equals(payload.get("isMilestone")));
         if (payload.get("sequence") != null) activity.setSequence(((Number) payload.get("sequence")).intValue());
-        activity.setIsActive(true);
+        activity.setActive(true);
         return activityRepository.save(activity);
     }
 
@@ -49,14 +49,14 @@ public class ActivityService {
         if (payload.get("plannedStartDate") != null) activity.setPlannedStartDate(LocalDate.parse((String) payload.get("plannedStartDate")));
         if (payload.get("plannedEndDate") != null) activity.setPlannedEndDate(LocalDate.parse((String) payload.get("plannedEndDate")));
         if (payload.get("estimatedHours") != null) activity.setEstimatedHours(new BigDecimal(payload.get("estimatedHours").toString()));
-        if (payload.get("isMilestone") != null) activity.setIsMilestone((Boolean) payload.get("isMilestone"));
+        if (payload.get("isMilestone") != null) activity.setMilestone(Boolean.TRUE.equals(payload.get("isMilestone")));
         if (payload.get("sequence") != null) activity.setSequence(((Number) payload.get("sequence")).intValue());
         return activityRepository.save(activity);
     }
 
     public void deactivate(Long id) {
         Activity activity = activityRepository.findById(id).orElseThrow(() -> new IllegalArgumentException("Activity not found: " + id));
-        activity.setIsActive(false);
+        activity.setActive(false);
         activityRepository.save(activity);
     }
 

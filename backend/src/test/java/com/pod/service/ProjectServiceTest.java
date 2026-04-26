@@ -5,6 +5,7 @@ import com.pod.entity.ProjectStatus;
 import com.pod.exception.TerminalStateException;
 import com.pod.repository.ProjectRepository;
 import com.pod.repository.RepositoryTestConfig;
+import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -43,6 +44,9 @@ class ProjectServiceTest {
 
     @Autowired
     private ProjectRepository projectRepository;
+
+    @Autowired
+    private EntityManager entityManager;
 
     @Test
     void testCreate_validProject_succeeds() {
@@ -185,11 +189,10 @@ class ProjectServiceTest {
         Project created = projectService.create("Test Project", new BigDecimal("100.00"), null, null);
         projectService.transitionToTerminal(created.getId(), ProjectStatus.CANCELLED);
 
-        // Manually backdate the updatedAt to 31 days ago
-        Optional<Project> opt = projectRepository.findById(created.getId());
-        Project project = opt.get();
-        project.setUpdatedAt(Instant.now().minus(31, ChronoUnit.DAYS));
-        projectRepository.save(project);
+        // Manually backdate the updatedAt to 31 days ago (bypasses @PreUpdate which resets it)
+        projectRepository.setUpdatedAt(created.getId(), Instant.now().minus(31, ChronoUnit.DAYS));
+        projectRepository.flush();
+        entityManager.clear();
 
         assertThatThrownBy(() -> projectService.reactivateCancelledProject(created.getId()))
             .isInstanceOf(TerminalStateException.class)

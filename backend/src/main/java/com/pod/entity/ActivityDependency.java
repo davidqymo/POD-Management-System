@@ -12,11 +12,11 @@ import java.io.Serializable;
 @IdClass(ActivityDependency.Id.class)
 public class ActivityDependency {
 
-    @Id
+    @jakarta.persistence.Id
     @Column(name = "predecessor_id", nullable = false)
     private Long predecessorId;
 
-    @Id
+    @jakarta.persistence.Id
     @Column(name = "successor_id", nullable = false)
     private Long successorId;
 
@@ -28,6 +28,9 @@ public class ActivityDependency {
     @Builder.Default
     private Integer lagDays = 0;
 
+    @EqualsAndHashCode
+    @NoArgsConstructor
+    @AllArgsConstructor
     public static class Id implements Serializable {
         private Long predecessorId;
         private Long successorId;
