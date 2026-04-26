@@ -1,8 +1,8 @@
 # POD Team Management System — Progress Log
 
-> **Last Updated:** 2026-04-25
+> **Last Updated:** 2026-04-27
 > **Current Branch:** main
-> **Current Phase:** Phase 2 — Implementation (ready to start)
+> **Current Phase:** Sprint 2 — Frontend Implementation (in progress)
 
 ---
 
@@ -12,7 +12,7 @@
 **Phase 1.5 (UX Design Deliverables):** ✅ **COMPLETE**
 **Phase 2 (Implementation Planning):** ✅ **COMPLETE**
 **Phase 2.5 (TDD Remediation):** ✅ **COMPLETE** — v2.1 → v2.2 critical block fixes (5 P0 + 5 P2), then v2.2 → v2.3 SFS alignment fixes (2 blocking notification events + 3 P1 service/error matrix)
-**Phase 3 (Implementation Execution):** 🎯 **READY TO START** — implementation plan at `doc/TECHNICAL_IMPLEMENTATION_PLAN.MD` (approved v1.0 with QA review at `doc/TECHNICAL_IMPLEMENTATION_PLAN_QA_REVIEW.MD`)
+**Sprint 2 Implementation:** 🔄 **IN PROGRESS** — T2.1–T2.5 (Project Management + Scheduler + Gantt Visualization with critical path)
 
 **TDD Version History:**
 | Version | Date       | Changes Summary |
@@ -110,8 +110,9 @@ All major decisions documented in `doc/PRODUCT_REQUIREMENTS.md` (v1.5). PRD upda
 - [x] **Sprint 2: Task T2.4 — Project Controller Layer** (REST APIs)
   - Status: ✅ COMPLETE (ProjectController with CRUD, status transitions, /gantt endpoint)
 
-- [x] **Sprint 2: Task T2.5 — Frontend** (Project List + Gantt Chart)
-  - Status: ✅ COMPLETE (projects.ts API client, ProjectList.tsx with pagination, GanttChart.tsx using gantt-task-react)
+- [x] **Sprint 2: Task T2.5 — Frontend** (Project List + Gantt Chart + Edit)
+  - Status: ✅ COMPLETE (projects.ts API client, ProjectList.tsx with pagination, ProjectDetail.tsx with project edit form + activity edit modal, GanttChart.tsx with clickable bars + critical path visualization)
+  - Git commit: `34d2ba2` — "feat: implement project edit, activity edit, and Gantt chart enhancements" (pushed to main)
 
 - [ ] **Sprint 3: Task T3.1 — Allocation Entity + Migration** (V4)
   - Status: PENDING
