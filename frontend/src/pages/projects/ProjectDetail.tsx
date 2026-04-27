@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { projectsApi, activitiesApi, Activity } from '../../api/projects';
+import { listAllocations } from '@/api/allocations';
 import { GanttChart } from '../../components/project/GanttChart';
 
 const STATUS_CONFIG: Record<string, { bg: string; text: string; border: string; label: string }> = {
@@ -20,6 +21,7 @@ export default function ProjectDetail() {
 
   const [showActivityForm, setShowActivityForm] = useState(false);
   const [scheduleView, setScheduleView] = useState<'list' | 'gantt'>('list');
+  const [activeTab, setActiveTab] = useState<'summary' | 'resources' | 'schedule'>('resources');
   const [showEditForm, setShowEditForm] = useState(false);
   const [editForm, setEditForm] = useState({
     name: '',
@@ -62,6 +64,13 @@ export default function ProjectDetail() {
   const { data: activitiesData, isLoading: activitiesLoading } = useQuery({
     queryKey: ['project', projectId, 'activities'],
     queryFn: () => activitiesApi.list(projectId),
+    enabled: !!projectId,
+  });
+
+  // Fetch allocations for this project
+  const { data: allocationsData, isLoading: allocationsLoading } = useQuery({
+    queryKey: ['allocations', 'project', projectId],
+    queryFn: () => listAllocations({ projectId }),
     enabled: !!projectId,
   });
 
@@ -357,7 +366,16 @@ export default function ProjectDetail() {
         </div>
       </div>
 
-      {/* Project Summary Card */}
+      {/* Tab Navigation */}
+      <div className="border-b border-gray-200">
+        <nav className="flex gap-8">
+          <button onClick={() => setActiveTab('summary')} className={`pb-3 text-sm font-medium transition-colors border-b-2 ${activeTab === 'summary' ? 'border-primary-600 text-primary-600' : 'border-transparent text-gray-500'}`}>Project Summary</button>
+          <button onClick={() => setActiveTab('resources')} className={`pb-3 text-sm font-medium transition-colors border-b-2 ${activeTab === 'resources' ? 'border-primary-600 text-primary-600' : 'border-transparent text-gray-500'}`}>Resources & Allocations</button>
+          <button onClick={() => setActiveTab('schedule')} className={`pb-3 text-sm font-medium transition-colors border-b-2 ${activeTab === 'schedule' ? 'border-primary-600 text-primary-600' : 'border-transparent text-gray-500'}`}>Schedule & Activities</button>
+        </nav>
+      </div>
+
+      {activeTab === 'summary' && (
       <div className="p-6 rounded-xl" style={{ backgroundColor: '#ffffff', border: '1px solid #e5e5e5' }}>
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-semibold display-text" style={{ color: '#171717' }}>Project Summary</h2>
@@ -508,8 +526,43 @@ export default function ProjectDetail() {
           </div>
         )}
       </div>
+      )}
 
-      {/* Schedule / Activities */}
+      {activeTab === 'resources' && (
+        <div className="space-y-4">
+          <h3 className="text-lg font-semibold">Resources Allocated to This Project</h3>
+          {allocationsLoading ? (
+            <div className="flex items-center justify-center py-8"><div className="w-6 h-6 border-2 border-brand-200 border-t-brand-500 rounded-full animate-spin" /></div>
+          ) : !allocationsData || allocationsData.length === 0 ? (
+            <div className="p-8 text-center text-gray-500 rounded-lg border border-gray-200">No resources allocated to this project yet.</div>
+          ) : (
+            <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white">
+              <table className="min-w-full divide-y divide-gray-200">
+                <thead className="bg-gray-50"><tr>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Resource</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Week</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Hours</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Activity</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Status</th>
+                </tr></thead>
+                <tbody className="divide-y divide-gray-200">
+                  {allocationsData.map((alloc: any) => (
+                    <tr key={alloc.id} className="hover:bg-gray-50">
+                      <td className="px-4 py-3 text-sm text-gray-900">{alloc.resourceName}</td>
+                      <td className="px-4 py-3 text-sm text-gray-600">{alloc.weekStartDate}</td>
+                      <td className="px-4 py-3 text-sm text-gray-600">{alloc.hours}h</td>
+                      <td className="px-4 py-3 text-sm text-gray-600">{alloc.activityName || '—'}</td>
+                      <td className="px-4 py-3"><span className={`px-2 py-1 text-xs rounded-full ${alloc.status === 'APPROVED' ? 'bg-green-100 text-green-800' : alloc.status === 'PENDING' ? 'bg-yellow-100 text-yellow-800' : 'bg-red-100 text-red-800'}`}>{alloc.status}</span></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {activeTab === 'schedule' && (
       <div className="p-6 rounded-xl" style={{ backgroundColor: '#ffffff', border: '1px solid #e5e5e5' }}>
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-4">
@@ -800,6 +853,7 @@ export default function ProjectDetail() {
           </>
         )}
       </div>
+      )}
 
       {/* Back Button */}
       <button
