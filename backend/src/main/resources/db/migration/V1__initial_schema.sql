@@ -144,6 +144,12 @@ CREATE TABLE IF NOT EXISTS allocations (
 
 CREATE INDEX idx_allocations_resource_week ON allocations (resource_id, week_start_date)
     WHERE is_active = TRUE;
+
+-- For allocation constraint validator: monthly hour sums + project spread per resource/month
+CREATE INDEX idx_allocations_resource_month_active
+    ON allocations (resource_id, week_start_date)
+    WHERE is_active = TRUE AND status = 'APPROVED';
+
 CREATE INDEX idx_allocations_project ON allocations (project_id)
     WHERE is_active = TRUE AND status = 'APPROVED';
 

@@ -10,10 +10,18 @@ export function GanttChart({ projectId, onActivityClick }: GanttChartProps) {
   const [ganttData, setGanttData] = useState<GanttData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [dimensions, setDimensions] = useState({ width: window.innerWidth, height: window.innerHeight });
+
+  useEffect(() => {
+    const updateDimensions = () => {
+      setDimensions({ width: window.innerWidth, height: window.innerHeight });
+    };
+    window.addEventListener('resize', updateDimensions);
+    return () => window.removeEventListener('resize', updateDimensions);
+  }, []);
 
   useEffect(() => {
     if (!projectId) return;
-
     setLoading(true);
     projectsApi.getGantt(projectId)
       .then(res => {
@@ -27,9 +35,13 @@ export function GanttChart({ projectId, onActivityClick }: GanttChartProps) {
       .finally(() => setLoading(false));
   }, [projectId]);
 
-  const { dateRange, startDate } = useMemo(() => {
+  const dayWidth = Math.max(32, Math.min(48, dimensions.width / 40));
+  const rowHeight = 44;
+  const headerHeight = 50;
+
+  const dateRangeInfo = useMemo(() => {
     if (!ganttData?.activities?.length) {
-      return { dateRange: [], startDate: null, endDate: null };
+      return { dateRange: [], startDate: null as Date | null, endDate: null as Date | null };
     }
 
     const dates = ganttData.activities.flatMap(a => [
@@ -54,9 +66,7 @@ export function GanttChart({ projectId, onActivityClick }: GanttChartProps) {
     return { dateRange: range, startDate: min, endDate: max };
   }, [ganttData]);
 
-  const dayWidth = 40;
-  const rowHeight = 44;
-  const headerHeight = 50;
+  const { dateRange, startDate } = dateRangeInfo;
 
   const formatDate = (date: Date) => {
     return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
@@ -67,10 +77,10 @@ export function GanttChart({ projectId, onActivityClick }: GanttChartProps) {
     return Math.floor((date.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24)) * dayWidth;
   };
 
-  const getBarWidth = (startDate?: string, endDate?: string) => {
-    if (!startDate || !endDate) return dayWidth * 3;
-    const start = new Date(startDate);
-    const end = new Date(endDate);
+  const getBarWidth = (startDateStr?: string, endDateStr?: string) => {
+    if (!startDateStr || !endDateStr) return dayWidth * 3;
+    const start = new Date(startDateStr);
+    const end = new Date(endDateStr);
     return Math.max(dayWidth, Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24) + 1) * dayWidth);
   };
 
@@ -109,17 +119,16 @@ export function GanttChart({ projectId, onActivityClick }: GanttChartProps) {
       {/* Header with dates */}
       <div className="flex sticky top-0 z-10" style={{ height: headerHeight, backgroundColor: '#fafafa' }}>
         <div className="flex items-center px-4 shrink-0" style={{ width: 200, borderRight: '1px solid #e5e5e5' }}>
-          <span className="text-xs font-medium" style={{ color: '#525252' }}>Activity</span>
+          <span className="text-xs font-semibold uppercase tracking-wide" style={{ color: '#525252' }}>Activity</span>
         </div>
         <div className="flex" style={{ width: chartWidth }}>
           {dateRange.filter((_, i) => i % 7 === 0).map((date, i) => (
             <div
               key={i}
-              className="absolute text-xs"
+              className="absolute text-xs font-mono"
               style={{
                 left: getPosition(date) + 200,
-                color: '#737373',
-                fontFamily: 'var(--font-mono)'
+                color: '#737373'
               }}
             >
               {formatDate(date)}
@@ -131,12 +140,12 @@ export function GanttChart({ projectId, onActivityClick }: GanttChartProps) {
       {/* Activities rows */}
       <div className="relative">
         {ganttData.activities.map((activity, index) => {
-          const startDate = activity.startDate ? new Date(activity.startDate) : null;
+          const actStartDate = activity.startDate ? new Date(activity.startDate) : null;
 
           return (
             <div
               key={activity.id}
-              className="flex items-center"
+              className="flex items-center transition-colors hover:bg-gray-50"
               style={{
                 height: rowHeight,
                 borderBottom: '1px solid #f5f5f5',
@@ -149,7 +158,7 @@ export function GanttChart({ projectId, onActivityClick }: GanttChartProps) {
                   {activity.isMilestone && (
                     <span className="w-2 h-2 rounded-full" style={{ backgroundColor: '#a855f7' }} />
                   )}
-                  <span className="text-sm truncate" style={{ color: '#171717' }}>
+                  <span className="text-sm font-medium truncate" style={{ color: '#171717' }}>
                     {activity.name}
                   </span>
                 </div>
@@ -157,19 +166,19 @@ export function GanttChart({ projectId, onActivityClick }: GanttChartProps) {
 
               {/* Gantt bars */}
               <div className="relative" style={{ width: chartWidth, height: rowHeight }}>
-                {startDate && (
+                {actStartDate && (
                   <div
                     className="absolute top-2 rounded flex items-center px-2 cursor-pointer hover:opacity-80 transition-opacity"
                     onClick={() => onActivityClick?.(activity.id)}
                     style={{
-                      left: getPosition(startDate),
+                      left: getPosition(actStartDate),
                       width: getBarWidth(activity.startDate, activity.endDate),
                       height: rowHeight - 12,
                       backgroundColor: activity.isCritical ? '#fee2e2' : activity.isMilestone ? '#f3e8ff' : '#d1fae5',
                       borderLeft: `3px solid ${activity.isCritical ? '#ef4444' : activity.isMilestone ? '#a855f7' : '#22c55e'}`
                     }}
                   >
-                    <span className="text-xs font-medium truncate" style={{
+                    <span className="text-xs font-semibold truncate" style={{
                       color: activity.isCritical ? '#b91c1c' : activity.isMilestone ? '#7e22ce' : '#065f46'
                     }}>
                       {activity.durationDays}d
@@ -218,7 +227,7 @@ export function GanttChart({ projectId, onActivityClick }: GanttChartProps) {
                   backgroundColor: '#ef4444'
                 }}
               >
-                <div className="absolute -top-1 -translate-x-1/2 px-1 py-0.5 rounded text-xs font-medium text-white" style={{ backgroundColor: '#ef4444' }}>
+                <div className="absolute -top-1 -translate-x-1/2 px-1 py-0.5 rounded text-xs font-semibold text-white" style={{ backgroundColor: '#ef4444' }}>
                   Today
                 </div>
               </div>
@@ -232,17 +241,17 @@ export function GanttChart({ projectId, onActivityClick }: GanttChartProps) {
       <div className="flex items-center gap-4 p-3 border-t" style={{ borderColor: '#e5e5e5', backgroundColor: '#fafafa' }}>
         <div className="flex items-center gap-2">
           <span className="w-3 h-3 rounded" style={{ backgroundColor: '#22c55e' }} />
-          <span className="text-xs" style={{ color: '#525252' }}>On Track</span>
+          <span className="text-xs font-medium" style={{ color: '#525252' }}>On Track</span>
         </div>
         <div className="flex items-center gap-2">
           <span className="w-3 h-3 rounded" style={{ backgroundColor: '#a855f7' }} />
-          <span className="text-xs" style={{ color: '#525252' }}>Milestone</span>
+          <span className="text-xs font-medium" style={{ color: '#525252' }}>Milestone</span>
         </div>
         <div className="flex items-center gap-2">
           <span className="w-3 h-3 rounded" style={{ backgroundColor: '#ef4444' }} />
-          <span className="text-xs" style={{ color: '#525252' }}>Critical Path</span>
+          <span className="text-xs font-medium" style={{ color: '#525252' }}>Critical Path</span>
         </div>
-        <div className="ml-auto text-xs" style={{ color: '#737373' }}>
+        <div className="ml-auto text-xs font-medium" style={{ color: '#737373' }}>
           Total: {ganttData.totalDurationDays} days
         </div>
       </div>

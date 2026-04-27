@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useCallback } from 'react'
+import { Link } from 'react-router-dom'
 import { FiSearch, FiPlus, FiDownload, FiX } from 'react-icons/fi'
 import DataTable from '../../components/common/DataTable'
 import ImportModal from '../../components/modals/ImportModal'
@@ -151,15 +152,15 @@ export default function ResourceList() {
       header: 'Name',
       width: 'w-[260px]',
       render: (r: Resource) => (
-        <div className="flex items-center gap-3">
+        <Link to={`/resources/${r.id}`} className="flex items-center gap-3 hover:bg-gray-50 -m-2 p-2 rounded-lg transition-colors">
           <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gray-100 text-[11px] font-semibold text-gray-500">
             {initials(r.name)}
           </div>
           <div>
-            <div className="text-sm font-medium text-gray-900">{r.name}</div>
+            <div className="text-sm font-medium text-gray-900 hover:text-primary-600">{r.name}</div>
             <div className="text-[11px] text-gray-400">{r.externalId}</div>
           </div>
-        </div>
+        </Link>
       ),
     },
     {

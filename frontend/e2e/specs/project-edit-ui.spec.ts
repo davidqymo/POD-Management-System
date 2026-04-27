@@ -12,8 +12,8 @@ test.describe('Project Detail Edit', () => {
     const projectName = await page.locator('h1').nth(1).textContent();
     console.log('Initial project name:', projectName);
 
-    // Click Edit button
-    const editButton = page.getByRole('button', { name: /Edit/i });
+    // Click Edit button (first one - the main project edit button)
+    const editButton = page.getByRole('button', { name: /Edit/i }).first();
     await editButton.click();
 
     // Wait for edit form to appear

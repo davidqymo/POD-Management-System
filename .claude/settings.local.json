@@ -23,7 +23,29 @@
       "Bash(npx tsc *)",
       "Bash(npm ci:*)",
       "Bash(npx vitest:*)",
-      "Bash(npx vite:*)"
+      "Bash(npx vite:*)",
+      "Bash(sed 's/\\\\[ERROR\\\\] //')",
+      "Bash(sed 's/.* //')",
+      "Bash(java *)",
+      "Bash(npx playwright *)",
+      "Bash(netstat -ano)",
+      "Bash(mvn spring-boot:run -Dspring-boot.run.profiles=dev)",
+      "Bash(curl -s http://localhost:8080/actuator/health)",
+      "Bash(mvn flyway:repair -Dflyway.url=jdbc:postgresql://localhost:5432/pod -Dflyway.user=postgres)",
+      "Bash(psql -U postgres -d pod -c \"SELECT flyway_repair\\(\\);\")",
+      "Bash(psql -U postgres -d pod -c \"DELETE FROM flyway_schema_history WHERE version = '1';\")",
+      "Bash(curl -s -X POST http://localhost:8080/api/v1/resources -H 'Content-Type: application/json' -d '{\"externalId\":\"TEST-123\",\"name\":\"Test User\",\"costCenterId\":\"ENG-CC1\",\"billableTeamCode\":\"BTC-API\",\"category\":\"PERMANENT\",\"skill\":\"backend\",\"level\":3,\"status\":\"ACTIVE\",\"isBillable\":true}')",
+      "Bash(curl *)",
+      "Bash(PGPASSWORD=postgres psql -h localhost -U postgres -d pod_team -c \"SELECT * FROM flyway_schema_history order by installed_rank;\")",
+      "Bash(PGPASSWORD=postgres psql *)",
+      "Bash(docker restart pod-postgres *)",
+      "Bash(docker exec pod-postgres *)",
+      "Bash(docker exec pod-team-management-system-postgres-1 *)",
+      "Bash(cd D:/projects/POD Team Management System/backend)",
+      "Bash(mvn spring-boot:run -DskipTests)",
+      "Bash(taskkill *)",
+      "Bash(npm run *)",
+      "Bash(powershell *)"
     ]
   }
 }

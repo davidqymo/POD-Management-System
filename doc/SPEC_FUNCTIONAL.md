@@ -674,9 +674,14 @@ Submit → PENDING → Notification to POD Manager
 |-------|------|------------|-------|
 | Resource | Search/dropdown | Required; must be active | Shows current utilization % |
 | Project | Search/dropdown | Required; must be in APPROVED or ACTIVE status | Shows remaining budget in K USD |
+| Activity | Search/dropdown | Optional; filtered by project | Shows activities within the selected project |
 | Week range | Date range picker | Required; continuous weeks only (no gaps) | Default: current week |
 | Hours per day | Number input | 1–10 hours/day | Auto-compute weekly total = hours×5 |
 | Notes | Textarea | Optional | — |
+
+**Dual View Modes:**
+- **Project-Level View:** Project Detail → Assignments tab → Shows all resources allocated to this project
+- **Resource-Level View:** Resource Detail → Assignments tab → Shows all projects this resource is allocated to
 
 **Real-time Validation (on field change):**
 - Budget check: Shows "Remaining budget: $245.50K" in green/yellow/red based on %

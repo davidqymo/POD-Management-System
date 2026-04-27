@@ -3,6 +3,7 @@ package com.pod.service;
 import com.pod.entity.Project;
 import com.pod.entity.ProjectStatus;
 import com.pod.exception.TerminalStateException;
+import com.pod.repository.AllocationRepository;
 import com.pod.repository.ProjectRepository;
 import jakarta.persistence.EntityManager;
 import org.springframework.data.domain.Page;
@@ -23,10 +24,13 @@ public class ProjectService {
     private static final int REACTIVATE_DAYS_LIMIT = 30;
     private final ProjectRepository projectRepository;
     private final EntityManager entityManager;
+    private final AllocationRepository allocationRepository;
 
-    public ProjectService(ProjectRepository projectRepository, EntityManager entityManager) {
+    public ProjectService(ProjectRepository projectRepository, EntityManager entityManager,
+                           AllocationRepository allocationRepository) {
         this.projectRepository = projectRepository;
         this.entityManager = entityManager;
+        this.allocationRepository = allocationRepository;
     }
 
     @Transactional(readOnly = true)
@@ -36,6 +40,15 @@ public class ProjectService {
 
     @Transactional(readOnly = true)
     public Page<Project> findAll(Pageable pageable) {
+        return projectRepository.findByIsActiveTrue(pageable);
+    }
+
+    @Transactional(readOnly = true)
+    public Page<Project> findAll(String status, Pageable pageable) {
+        if (status != null && !status.isEmpty()) {
+            ProjectStatus projectStatus = ProjectStatus.valueOf(status);
+            return projectRepository.findByStatusAndIsActiveTrue(projectStatus, pageable);
+        }
         return projectRepository.findByIsActiveTrue(pageable);
     }
 
@@ -123,6 +136,12 @@ public class ProjectService {
         if (project.getStatus() == ProjectStatus.COMPLETED || project.getStatus() == ProjectStatus.CANCELLED) {
             throw new TerminalStateException("Project is already in terminal state: " + project.getStatus());
         }
+
+        // Auto-close allocations when project transitions to terminal
+        int closed = allocationRepository.softCloseAllByProject(id,
+            "Project " + newStatus + " (allocation auto-close)"
+        );
+
         project.setStatus(newStatus);
         return projectRepository.save(project);
     }

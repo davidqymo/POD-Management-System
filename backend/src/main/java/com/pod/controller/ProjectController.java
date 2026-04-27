@@ -35,7 +35,7 @@ public class ProjectController {
     @GetMapping
     public ResponseEntity<?> getAll(@RequestParam(required = false) String status,
             @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "20") int size) {
-        Page<Project> projects = projectService.findAll(PageRequest.of(page, size, Sort.by("createdAt").descending()));
+        Page<Project> projects = projectService.findAll(status, PageRequest.of(page, size, Sort.by("createdAt").descending()));
         return ResponseEntity.ok(projects);
     }
 

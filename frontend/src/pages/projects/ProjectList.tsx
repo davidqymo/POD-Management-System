@@ -28,7 +28,7 @@ export function ProjectList() {
 
   const { data, isLoading } = useQuery({
     queryKey: ['projects', page, status],
-    queryFn: () => projectsApi.list({ page, size: 20 }),
+    queryFn: () => projectsApi.list({ page, size: 20, status: status || undefined }),
   });
 
   const projects: Project[] = data?.data?.content || [];
