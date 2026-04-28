@@ -7,7 +7,7 @@ export function useResources(filters: ResourceFilters = {}) {
     queryKey: ['resources', filters],
     queryFn: async () => {
       const response = await getResources(filters)
-      return response.content
+      return response
     },
   })
 }

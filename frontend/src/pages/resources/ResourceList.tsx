@@ -107,6 +107,8 @@ export default function ResourceList() {
   const [costCenter, setCostCenter] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
   const [showImport, setShowImport] = useState(false)
+  const [page, setPage] = useState(0)
+  const [pageSize, setPageSize] = useState(20)
 
   // Debounced search
   const [debouncedSearch, setDebouncedSearch] = useState(search)
@@ -122,18 +124,24 @@ export default function ResourceList() {
       skill: skill || undefined,
       costCenter: costCenter || undefined,
       status: statusFilter || undefined,
+      page,
+      size: pageSize,
     }),
-    [debouncedSearch, skill, costCenter, statusFilter],
+    [debouncedSearch, skill, costCenter, statusFilter, page, pageSize],
   )
 
   // TanStack Query — data fetched from backend via useResources hook
-  const { data: resources = [], isLoading } = useResources(filters)
+  const { data: resourcesData, isLoading } = useResources(filters)
+  const resources = resourcesData?.content || []
+  const totalElements = resourcesData?.totalElements || 0
+  const totalPages = resourcesData?.totalPages || 0
 
   const handleReset = useCallback(() => {
     setSearch('')
     setSkill('')
     setCostCenter('')
     setStatusFilter('')
+    setPage(0)
   }, [])
 
   const handleRemove = useCallback(
@@ -142,6 +150,7 @@ export default function ResourceList() {
       else if (key === 'skill') setSkill('')
       else if (key === 'cc') setCostCenter('')
       else if (key === 'status') setStatusFilter('')
+      setPage(0)
     },
     [],
   )
@@ -245,7 +254,7 @@ export default function ResourceList() {
           {/* Skill filter */}
           <select
             value={skill}
-            onChange={(e) => setSkill(e.target.value)}
+            onChange={(e) => { setSkill(e.target.value); setPage(0); }}
             className="rounded-lg border border-gray-200 bg-white py-2 pl-3 pr-8 text-sm text-gray-700 outline-none transition-colors focus:border-primary-600 focus:ring-1 focus:ring-primary-600"
           >
             <option value="">All Skills</option>
@@ -257,7 +266,7 @@ export default function ResourceList() {
           {/* Cost Center */}
           <select
             value={costCenter}
-            onChange={(e) => setCostCenter(e.target.value)}
+            onChange={(e) => { setCostCenter(e.target.value); setPage(0); }}
             className="rounded-lg border border-gray-200 bg-white py-2 pl-3 pr-8 text-sm text-gray-700 outline-none transition-colors focus:border-primary-600 focus:ring-1 focus:ring-primary-600"
           >
             <option value="">All Cost Centers</option>
@@ -269,7 +278,7 @@ export default function ResourceList() {
           {/* Status */}
           <select
             value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
+            onChange={(e) => { setStatusFilter(e.target.value); setPage(0); }}
             className="rounded-lg border border-gray-200 bg-white py-2 pl-3 pr-8 text-sm text-gray-700 outline-none transition-colors focus:border-primary-600 focus:ring-1 focus:ring-primary-600"
           >
             <option value="">All Statuses</option>
@@ -297,6 +306,69 @@ export default function ResourceList() {
         isLoading={isLoading}
         emptyMessage="No resources found matching your filters."
       />
+
+      {/* Pagination */}
+      {totalPages > 0 && (
+        <div className="flex items-center justify-between px-4 py-3 bg-white border border-gray-200 rounded-lg">
+          <div className="flex items-center gap-2 text-sm text-gray-600">
+            <span>Showing</span>
+            <span className="font-medium">{page * pageSize + 1}</span>
+            <span>to</span>
+            <span className="font-medium">{Math.min((page + 1) * pageSize, totalElements)}</span>
+            <span>of</span>
+            <span className="font-medium">{totalElements}</span>
+            <span>results</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <select
+              value={pageSize}
+              onChange={(e) => {
+                setPageSize(Number(e.target.value))
+                setPage(0)
+              }}
+              className="rounded-lg border border-gray-200 py-1.5 px-2 text-sm text-gray-700"
+            >
+              <option value={10}>10 / page</option>
+              <option value={20}>20 / page</option>
+              <option value={50}>50 / page</option>
+              <option value={100}>100 / page</option>
+            </select>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => setPage(0)}
+                disabled={page === 0}
+                className="px-2 py-1 text-sm rounded border border-gray-200 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
+              >
+                ««
+              </button>
+              <button
+                onClick={() => setPage(Math.max(0, page - 1))}
+                disabled={page === 0}
+                className="px-2 py-1 text-sm rounded border border-gray-200 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
+              >
+                «
+              </button>
+              <span className="px-2 py-1 text-sm text-gray-600">
+                Page {page + 1} of {totalPages}
+              </span>
+              <button
+                onClick={() => setPage(Math.min(totalPages - 1, page + 1))}
+                disabled={page >= totalPages - 1}
+                className="px-2 py-1 text-sm rounded border border-gray-200 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
+              >
+                »
+              </button>
+              <button
+                onClick={() => setPage(totalPages - 1)}
+                disabled={page >= totalPages - 1}
+                className="px-2 py-1 text-sm rounded border border-gray-200 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
+              >
+                »»
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Import Modal */}
       <ImportModal
