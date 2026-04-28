@@ -26,6 +26,7 @@ export default function AllocationPage() {
   const queryClient = useQueryClient();
   const [modalOpen, setModalOpen] = useState(false);
   const [currentUserId] = useState(1);
+  const [resourceFilter, setResourceFilter] = useState<string>('');
 
   const { data: allocations = [], isLoading } = useQuery({
     queryKey: ['allocations'],
@@ -86,6 +87,11 @@ export default function AllocationPage() {
     await rejectMutation.mutateAsync(request);
   };
 
+  // Filter allocations by resource
+  const filteredAllocations = resourceFilter
+    ? allocations.filter((alloc: any) => alloc.resourceId === Number(resourceFilter))
+    : allocations;
+
   return (
     <div className="p-6 space-y-6">
       {/* Page Header */}
@@ -93,7 +99,7 @@ export default function AllocationPage() {
         <div>
           <h1 className="text-2xl font-semibold text-gray-900">Allocations</h1>
           <p className="text-sm mt-1 text-gray-500">
-            {allocations.length} allocation{allocations.length !== 1 ? 's' : ''} found
+            {filteredAllocations.length} allocation{filteredAllocations.length !== 1 ? 's' : ''} found
           </p>
         </div>
         <button
@@ -111,9 +117,36 @@ export default function AllocationPage() {
         </button>
       </div>
 
+      {/* Filter Bar */}
+      <div className="flex items-center gap-4 p-4 bg-gray-50 rounded-lg">
+        <div className="flex items-center gap-2">
+          <label className="text-sm font-medium text-gray-700">Filter by Resource:</label>
+          <select
+            value={resourceFilter}
+            onChange={(e) => setResourceFilter(e.target.value)}
+            className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-primary-500"
+          >
+            <option value="">All Resources</option>
+            {resources.map((resource: any) => (
+              <option key={resource.id} value={resource.id}>
+                {resource.name}
+              </option>
+            ))}
+          </select>
+        </div>
+        {resourceFilter && (
+          <button
+            onClick={() => setResourceFilter('')}
+            className="text-sm text-primary-600 hover:text-primary-700"
+          >
+            Clear Filter
+          </button>
+        )}
+      </div>
+
       {/* Approval Panel */}
       <AllocationApprovalPanel
-        allocations={allocations}
+        allocations={filteredAllocations}
         loading={isLoading}
         onApprove={handleApprove}
         onReject={handleReject}
@@ -122,7 +155,7 @@ export default function AllocationPage() {
 
       {/* Allocation List */}
       <AllocationList
-        allocations={allocations}
+        allocations={filteredAllocations}
         loading={isLoading}
       />
 
