@@ -171,7 +171,11 @@ export default function AllocationModal({
             </label>
             <select
               value={form.projectId ?? ''}
-              onChange={(e) => setForm({ ...form, projectId: e.target.value ? Number(e.target.value) : null })}
+              onChange={(e) => {
+                e.preventDefault();
+                const value = e.target.value;
+                setForm({ ...form, projectId: value ? Number(value) : null });
+              }}
               className="w-full px-3 py-2.5 text-sm border border-gray-300 rounded-lg bg-white focus:border-primary-600 focus:outline-none focus:ring-1 focus:ring-primary-600 transition-colors"
             >
               <option value="">Select project...</option>
