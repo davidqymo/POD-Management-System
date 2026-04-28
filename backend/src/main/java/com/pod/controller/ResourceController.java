@@ -15,6 +15,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.HashMap;
 import java.util.Map;
 
 @RestController
@@ -61,5 +62,10 @@ public class ResourceController {
     @PatchMapping("/{id}/deactivate")
     public void deactivate(@PathVariable Long id) {
         resourceService.deactivate(id);
+    }
+
+    @PostMapping("/{id}/update")
+    public Resource update(@PathVariable Long id, @RequestBody Map<String, Object> body) {
+        return resourceService.updateFields(id, body);
     }
 }

@@ -17,7 +17,6 @@ import { getResources } from '@/api/resources';
 interface CreateAllocationForm {
   resourceId: number | null;
   projectId: number | null;
-  activityId: number | null;
   weekStartDate: string;
   hours: string;
   notes: string;
@@ -53,8 +52,7 @@ export default function AllocationPage() {
       const request: CreateAllocationRequest = {
         resourceId: form.resourceId,
         projectId: form.projectId,
-        activityId: form.activityId || undefined,
-        weekStartDate: form.weekStartDate,
+        weekStart: form.weekStartDate,
         hours: parseFloat(form.hours),
         notes: form.notes || undefined,
       };

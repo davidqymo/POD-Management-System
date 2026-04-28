@@ -30,3 +30,7 @@ export function changeStatus(id: number, status: string, reason?: string) {
 export function deleteResource(id: number) {
   return client.delete<void>(`/resources/${id}`).then(() => undefined)
 }
+
+export function updateResource(id: number, resource: Partial<Resource>) {
+  return client.post<Resource>(`/resources/${id}/update`, resource).then((r) => r.data)
+}

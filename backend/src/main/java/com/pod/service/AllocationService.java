@@ -260,4 +260,25 @@ public class AllocationService {
     public List<Allocation> findAll() {
         return allocationRepository.findAllWithAssociations();
     }
+
+    /**
+     * Update an allocation - currently supports assigning to an activity.
+     */
+    @Transactional
+    public Allocation updateAllocation(Long allocationId, Long activityId) {
+        Allocation allocation = allocationRepository.findById(allocationId)
+            .orElseThrow(() -> new ResourceNotFoundException("Allocation not found: " + allocationId));
+
+        if (activityId != null) {
+            Activity activity = activityRepository.findById(activityId)
+                .orElseThrow(() -> new ResourceNotFoundException("Activity not found: " + activityId));
+            // Verify activity belongs to the same project
+            if (!activity.getProjectId().equals(allocation.getProject().getId())) {
+                throw new IllegalArgumentException("Activity does not belong to this project");
+            }
+            allocation.setActivity(activity);
+        }
+
+        return allocationRepository.save(allocation);
+    }
 }

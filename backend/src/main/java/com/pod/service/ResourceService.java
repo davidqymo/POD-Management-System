@@ -15,6 +15,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 /**
@@ -133,5 +134,39 @@ public class ResourceService {
         // Record audit (GREEN: stub — simple log; REFACTOR will inject AuditService)
         System.out.printf("[AUDIT] Resource %d status %s → %s : %s%n",
             resourceId, resource.getStatus(), newStatus, reason);
+    }
+
+    /**
+     * Update resource fields.
+     */
+    public Resource updateFields(Long id, Map<String, Object> fields) {
+        Resource resource = entityManager.find(Resource.class, id, LockModeType.PESSIMISTIC_WRITE);
+        if (resource == null) {
+            throw new EntityNotFoundException("Resource not found: " + id);
+        }
+
+        if (fields.containsKey("name") && fields.get("name") != null) {
+            resource.setName(fields.get("name").toString());
+        }
+        if (fields.containsKey("externalId") && fields.get("externalId") != null) {
+            resource.setExternalId(fields.get("externalId").toString());
+        }
+        if (fields.containsKey("costCenterId") && fields.get("costCenterId") != null) {
+            resource.setCostCenterId(fields.get("costCenterId").toString());
+        }
+        if (fields.containsKey("billableTeamCode") && fields.get("billableTeamCode") != null) {
+            resource.setBillableTeamCode(fields.get("billableTeamCode").toString());
+        }
+                if (fields.containsKey("skill") && fields.get("skill") != null) {
+            resource.setSkill(fields.get("skill").toString());
+        }
+        if (fields.containsKey("level") && fields.get("level") != null) {
+            resource.setLevel(Integer.parseInt(fields.get("level").toString()));
+        }
+        if (fields.containsKey("isBillable")) {
+            resource.setBillable(Boolean.parseBoolean(fields.get("isBillable").toString()));
+        }
+
+        return resourceRepository.save(resource);
     }
 }

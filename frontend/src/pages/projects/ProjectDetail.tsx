@@ -2,8 +2,10 @@ import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { projectsApi, activitiesApi, Activity } from '../../api/projects';
-import { listAllocations } from '@/api/allocations';
+import { listAllocations, createAllocation, CreateAllocationRequest } from '@/api/allocations';
 import { GanttChart } from '../../components/project/GanttChart';
+import AllocationModal from '@/components/allocation/AllocationModal';
+import { getResources } from '@/api/resources';
 
 const STATUS_CONFIG: Record<string, { bg: string; text: string; border: string; label: string }> = {
   REQUESTED: { bg: '#eff6ff', text: '#1d4ed8', border: '#3b82f6', label: 'Requested' },
@@ -43,6 +45,7 @@ export default function ProjectDetail() {
   });
   const [selectedActivity, setSelectedActivity] = useState<Activity | null>(null);
   const [showActivityEditForm, setShowActivityEditForm] = useState(false);
+  const [showAllocModal, setShowAllocModal] = useState(false);
   const [activityEditForm, setActivityEditForm] = useState({
     name: '',
     description: '',
@@ -51,6 +54,12 @@ export default function ProjectDetail() {
     estimatedHours: '',
     isMilestone: false,
     sequence: 0,
+  });
+  const [showResourceAssignForm, setShowResourceAssignForm] = useState(false);
+  const [resourceAssignForm, setResourceAssignForm] = useState({
+    resourceId: '' as string | number,
+    hours: '',
+    weekStartDate: '',
   });
 
   // Fetch project data
@@ -114,6 +123,20 @@ export default function ProjectDetail() {
       queryClient.invalidateQueries({ queryKey: ['projects'] });
     },
   });
+
+  const createAllocMutation = useMutation({
+    mutationFn: (request: CreateAllocationRequest) => createAllocation(request),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['allocations', 'project', projectId] });
+      setShowAllocModal(false);
+    },
+  });
+
+  const { data: resourcesData } = useQuery({
+    queryKey: ['resources', 'all'],
+    queryFn: () => getResources({ page: 0, size: 200 }),
+  });
+  const allResources = (resourcesData as any)?.content || [];
 
   // Update project - direct function (not useMutation to avoid closure issues)
   const updateProject = async () => {
@@ -315,7 +338,7 @@ export default function ProjectDetail() {
   const statusStyle = STATUS_CONFIG[p.status] || STATUS_CONFIG.REQUESTED;
 
   return (
-    <div className="max-w-4xl space-y-6 p-6">
+    <div className="w-full space-y-6 p-6">
       {/* Header */}
       <div className="flex items-center gap-4">
         <button
@@ -530,33 +553,118 @@ export default function ProjectDetail() {
 
       {activeTab === 'resources' && (
         <div className="space-y-4">
-          <h3 className="text-lg font-semibold">Resources Allocated to This Project</h3>
+          <div className="flex items-center justify-between">
+            <h3 className="text-lg font-semibold">Resources Allocated to This Project</h3>
+            <button
+              onClick={() => setShowAllocModal(true)}
+              className="px-4 py-2 rounded-lg font-medium text-white text-sm"
+              style={{ background: 'linear-gradient(135deg, #209d9d 0%, #0D4F4F 100%)' }}
+            >
+              + Add Allocation
+            </button>
+          </div>
           {allocationsLoading ? (
             <div className="flex items-center justify-center py-8"><div className="w-6 h-6 border-2 border-brand-200 border-t-brand-500 rounded-full animate-spin" /></div>
           ) : !allocationsData || allocationsData.length === 0 ? (
             <div className="p-8 text-center text-gray-500 rounded-lg border border-gray-200">No resources allocated to this project yet.</div>
           ) : (
-            <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white">
-              <table className="min-w-full divide-y divide-gray-200">
-                <thead className="bg-gray-50"><tr>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Resource</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Week</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Hours</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Activity</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Status</th>
-                </tr></thead>
-                <tbody className="divide-y divide-gray-200">
-                  {allocationsData.map((alloc: any) => (
-                    <tr key={alloc.id} className="hover:bg-gray-50">
-                      <td className="px-4 py-3 text-sm text-gray-900">{alloc.resourceName}</td>
-                      <td className="px-4 py-3 text-sm text-gray-600">{alloc.weekStartDate}</td>
-                      <td className="px-4 py-3 text-sm text-gray-600">{alloc.hours}h</td>
-                      <td className="px-4 py-3 text-sm text-gray-600">{alloc.activityName || '—'}</td>
-                      <td className="px-4 py-3"><span className={`px-2 py-1 text-xs rounded-full ${alloc.status === 'APPROVED' ? 'bg-green-100 text-green-800' : alloc.status === 'PENDING' ? 'bg-yellow-100 text-yellow-800' : 'bg-red-100 text-red-800'}`}>{alloc.status}</span></td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            <div className="space-y-4">
+              {/* Group allocations by resource */}
+              {(() => {
+                // Group allocations by resource
+                const resourceGroups: Record<number, { projectAllocs: any[]; activityAllocs: any[] }> = {};
+                allocationsData.forEach((alloc: any) => {
+                  if (!resourceGroups[alloc.resourceId]) {
+                    resourceGroups[alloc.resourceId] = { projectAllocs: [], activityAllocs: [] };
+                  }
+                  if (!alloc.activityId) {
+                    resourceGroups[alloc.resourceId].projectAllocs.push(alloc);
+                  } else {
+                    resourceGroups[alloc.resourceId].activityAllocs.push(alloc);
+                  }
+                });
+
+                return Object.entries(resourceGroups).map(([resourceId, groups]) => {
+                  const projectAllocs = groups.projectAllocs;
+                  const activityAllocs = groups.activityAllocs;
+                  const resourceName = projectAllocs[0]?.resourceName || activityAllocs[0]?.resourceName || 'Unknown';
+                  const totalProjectHours = projectAllocs.reduce((sum: number, a: any) => sum + (a.hours || 0), 0);
+                  const totalActivityHours = activityAllocs.reduce((sum: number, a: any) => sum + (a.hours || 0), 0);
+
+                  return (
+                    <div key={resourceId} className="rounded-lg border border-gray-200 overflow-hidden">
+                      {/* Project Level Header */}
+                      <div className="bg-blue-50 px-4 py-3 flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <span className="text-sm font-semibold text-gray-900">{resourceName}</span>
+                        </div>
+                        <div className="flex items-center gap-4 text-sm">
+                          <span className="text-gray-600">Total: <span className="font-medium text-blue-700">{totalProjectHours}h</span></span>
+                          <span className="text-gray-400">|</span>
+                          <span className="text-gray-600">Allocated: <span className="font-medium text-purple-700">{totalActivityHours}h</span></span>
+                          <span className="text-gray-400">|</span>
+                          <span className="text-gray-600">Available: <span className={`font-medium ${totalProjectHours - totalActivityHours > 0 ? 'text-green-600' : 'text-red-600'}`}>{totalProjectHours - totalActivityHours}h</span></span>
+                        </div>
+                      </div>
+
+                      {/* Project-level allocations */}
+                      {projectAllocs.length > 0 && (
+                        <table className="min-w-full">
+                          <thead className="bg-gray-50">
+                            <tr>
+                              <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Week</th>
+                              <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Hours</th>
+                              <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-gray-100">
+                            {projectAllocs.map((alloc: any) => (
+                              <tr key={alloc.id} className="hover:bg-gray-50">
+                                <td className="px-4 py-2 text-sm text-gray-600">{alloc.weekStartDate}</td>
+                                <td className="px-4 py-2 text-sm font-medium text-gray-900">{alloc.hours}h</td>
+                                <td className="px-4 py-2">
+                                  <span className={`px-2 py-0.5 text-xs rounded-full ${alloc.status === 'APPROVED' ? 'bg-green-100 text-green-800' : alloc.status === 'PENDING' ? 'bg-yellow-100 text-yellow-800' : 'bg-red-100 text-red-800'}`}>
+                                    {alloc.status}
+                                  </span>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      )}
+
+                      {/* Activity-level allocations (sub-items) */}
+                      {activityAllocs.length > 0 && (
+                        <div className="border-t border-gray-100">
+                          <table className="min-w-full">
+                            <tbody className="divide-y divide-gray-100">
+                              {activityAllocs.map((alloc: any) => (
+                                <tr key={alloc.id} className="hover:bg-gray-50">
+                                  <td className="px-6 py-2 text-sm text-gray-500">{alloc.activityName || '—'}</td>
+                                  <td className="px-4 py-2 text-sm text-gray-600">{alloc.weekStartDate}</td>
+                                  <td className="px-4 py-2 text-sm font-medium text-gray-900">{alloc.hours}h</td>
+                                  <td className="px-4 py-2">
+                                    <span className={`px-2 py-0.5 text-xs rounded-full ${alloc.status === 'APPROVED' ? 'bg-green-100 text-green-800' : alloc.status === 'PENDING' ? 'bg-yellow-100 text-yellow-800' : 'bg-red-100 text-red-800'}`}>
+                                      {alloc.status}
+                                    </span>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+
+                      {/* Show warning if over-allocated */}
+                      {totalActivityHours > totalProjectHours && (
+                        <div className="px-4 py-2 bg-red-50 border-t border-red-100 text-xs text-red-700">
+                          ⚠️ Warning: Activity allocations exceed project-level allocation by {totalActivityHours - totalProjectHours}h
+                        </div>
+                      )}
+                    </div>
+                  );
+                });
+              })()}
             </div>
           )}
         </div>
@@ -768,6 +876,169 @@ export default function ProjectDetail() {
                   />
                   <label htmlFor="isMilestoneEdit" className="text-sm" style={{ color: '#525252' }}>Milestone</label>
                 </div>
+
+                {/* Allocated Resources Section */}
+                <div className="mt-4 pt-4 border-t border-gray-200">
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="block text-xs uppercase tracking-wider" style={{ color: '#737373' }}>Allocated Resources</label>
+                    <button
+                      onClick={() => setShowResourceAssignForm(!showResourceAssignForm)}
+                      className="text-xs px-2 py-1 rounded font-medium"
+                      style={{ backgroundColor: '#e0f2f2', color: '#209d9d' }}
+                    >
+                      + Add Resource
+                    </button>
+                  </div>
+
+                  {allocationsData && allocationsData.length > 0 ? (
+                    <div className="space-y-2 max-h-40 overflow-y-auto">
+                      {allocationsData
+                        .filter((alloc: any) => alloc.activityId === selectedActivity?.id)
+                        .map((alloc: any) => (
+                          <div key={alloc.id} className="flex items-center justify-between p-2 rounded bg-gray-50 text-sm">
+                            <span className="text-gray-700">{alloc.resourceName}</span>
+                            <span className="text-xs text-gray-500">{alloc.hours}h/week</span>
+                          </div>
+                        ))}
+                      {allocationsData.filter((alloc: any) => alloc.activityId === selectedActivity?.id).length === 0 && (
+                        <p className="text-sm text-gray-400 italic">No resources allocated to this activity</p>
+                      )}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-gray-400 italic">No allocations for this project</p>
+                  )}
+
+                  {/* Resource Assignment Form */}
+                  {showResourceAssignForm && (() => {
+                    // Get unique resources allocated to this project (without activityId = project level)
+                    const projectLevelAllocs = allocationsData?.filter((a: any) => !a.activityId) || [];
+                    // Calculate available hours for each resource
+                    const resourceAvailableHours: Record<number, number> = {};
+                    projectLevelAllocs.forEach((alloc: any) => {
+                      const resourceId = alloc.resourceId;
+                      const projectHours = alloc.hours;
+                      const assignedToActivities = allocationsData
+                        ?.filter((a: any) => a.resourceId === resourceId && a.activityId && a.activityId !== selectedActivity?.id)
+                        ?.reduce((sum: number, a: any) => sum + (a.hours || 0), 0) || 0;
+                      resourceAvailableHours[resourceId] = projectHours - assignedToActivities;
+                    });
+
+                    return (
+                    <div className="mt-3 p-3 rounded-lg border border-gray-200 bg-gray-50 space-y-3">
+                      <div>
+                        <label className="block text-xs text-gray-500 mb-1">Select Resource (from allocated)</label>
+                        <select
+                          value={resourceAssignForm.resourceId}
+                          onChange={(e) => setResourceAssignForm({ ...resourceAssignForm, resourceId: e.target.value })}
+                          className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded"
+                        >
+                          <option value="">Select a resource...</option>
+                          {projectLevelAllocs.length > 0 ? (
+                            projectLevelAllocs.map((alloc: any) => {
+                              const available = resourceAvailableHours[alloc.resourceId] || 0;
+                              return (
+                                <option key={alloc.resourceId} value={alloc.resourceId}>
+                                  {alloc.resourceName} (Available: {available}h)
+                                </option>
+                              );
+                            })
+                          ) : (
+                            <option disabled>No project-level allocations</option>
+                          )}
+                        </select>
+                      </div>
+
+                      {/* Show allocation breakdown */}
+                      {resourceAssignForm.resourceId && (
+                        <div className="p-2 rounded bg-white border border-gray-200 text-xs">
+                          <div className="flex justify-between">
+                            <span className="text-gray-500">Project Total:</span>
+                            <span className="font-medium">{projectLevelAllocs.find((a: any) => a.resourceId === Number(resourceAssignForm.resourceId))?.hours || 0}h</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-gray-500">Assigned to Other Activities:</span>
+                            <span className="font-medium text-orange-600">
+                              {allocationsData?.filter((a: any) => a.resourceId === Number(resourceAssignForm.resourceId) && a.activityId && a.activityId !== selectedActivity?.id).reduce((sum: number, a: any) => sum + (a.hours || 0), 0) || 0}h
+                            </span>
+                          </div>
+                          <div className="flex justify-between border-t pt-1 mt-1">
+                            <span className="text-gray-500">Available for This Activity:</span>
+                            <span className="font-medium text-green-600">{resourceAvailableHours[Number(resourceAssignForm.resourceId)] || 0}h</span>
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="block text-xs text-gray-500 mb-1">Hours/Week</label>
+                          <input
+                            type="number"
+                            value={resourceAssignForm.hours}
+                            onChange={(e) => setResourceAssignForm({ ...resourceAssignForm, hours: e.target.value })}
+                            placeholder="e.g., 8"
+                            max={resourceAvailableHours[Number(resourceAssignForm.resourceId)] || undefined}
+                            className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs text-gray-500 mb-1">Week Start</label>
+                          <input
+                            type="date"
+                            value={resourceAssignForm.weekStartDate}
+                            onChange={(e) => setResourceAssignForm({ ...resourceAssignForm, weekStartDate: e.target.value })}
+                            className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded"
+                          />
+                        </div>
+                      </div>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={async () => {
+                            const hours = parseFloat(resourceAssignForm.hours);
+                            const available = resourceAvailableHours[Number(resourceAssignForm.resourceId)] || 0;
+                            if (!resourceAssignForm.resourceId || !resourceAssignForm.hours || !resourceAssignForm.weekStartDate) {
+                              alert('Please fill all fields');
+                              return;
+                            }
+                            if (hours > available) {
+                              alert(`Cannot assign ${hours}h. Only ${available}h available for this activity.`);
+                              return;
+                            }
+                            try {
+                              await createAllocMutation.mutateAsync({
+                                resourceId: Number(resourceAssignForm.resourceId),
+                                projectId: projectId,
+                                activityId: selectedActivity?.id || undefined,
+                                weekStart: resourceAssignForm.weekStartDate,
+                                hours: hours,
+                              });
+                              setShowResourceAssignForm(false);
+                              setResourceAssignForm({ resourceId: '', hours: '', weekStartDate: '' });
+                            } catch (err) {
+                              console.error('Failed to allocate resource:', err);
+                              alert('Failed to allocate resource');
+                            }
+                          }}
+                          disabled={createAllocMutation.isPending}
+                          className="px-3 py-1.5 text-xs rounded font-medium"
+                          style={{ backgroundColor: '#209d9d', color: 'white' }}
+                        >
+                          {createAllocMutation.isPending ? 'Adding...' : 'Add'}
+                        </button>
+                        <button
+                          onClick={() => {
+                            setShowResourceAssignForm(false);
+                            setResourceAssignForm({ resourceId: '', hours: '', weekStartDate: '' });
+                          }}
+                          className="px-3 py-1.5 text-xs rounded font-medium"
+                          style={{ backgroundColor: '#f5f5f5', color: '#525252' }}
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                    );
+                  })()}
+                </div>
               </div>
 
               <div className="flex gap-2 mt-6">
@@ -863,6 +1134,27 @@ export default function ProjectDetail() {
       >
         ← Back to Projects
       </button>
+
+      {/* Allocation Modal */}
+      <AllocationModal
+        open={showAllocModal}
+        onClose={() => setShowAllocModal(false)}
+        onSubmit={async (form) => {
+          if (!form.resourceId || !form.projectId || !form.weekStartDate || !form.hours) {
+            throw new Error('Please fill all required fields');
+          }
+          await createAllocMutation.mutateAsync({
+            resourceId: form.resourceId,
+            projectId: form.projectId,
+            weekStart: form.weekStartDate,
+            hours: parseFloat(form.hours),
+            notes: form.notes || undefined,
+          });
+        }}
+        defaultProjectId={projectId}
+        resources={allResources}
+        projects={[{ id: projectId, name: project?.data?.name || '' }]}
+      />
     </div>
   );
 }

@@ -10,9 +10,16 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.*;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 /**
@@ -114,6 +121,18 @@ public class AllocationController {
     @GetMapping("/{id}")
     public ResponseEntity<AllocationDTO> getAllocation(@PathVariable Long id) {
         Allocation allocation = allocationService.findById(id);
+        AllocationDTO dto = mapToDTO(allocation);
+        return ResponseEntity.ok(dto);
+    }
+
+    /**
+     * Assign activity to allocation via body.
+     */
+    @PostMapping("/assign-activity")
+    public ResponseEntity<AllocationDTO> assignActivityBody(@RequestBody Map<String, Long> body) {
+        Long allocationId = body.get("allocationId");
+        Long activityId = body.get("activityId");
+        Allocation allocation = allocationService.updateAllocation(allocationId, activityId);
         AllocationDTO dto = mapToDTO(allocation);
         return ResponseEntity.ok(dto);
     }

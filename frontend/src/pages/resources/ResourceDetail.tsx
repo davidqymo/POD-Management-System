@@ -1,19 +1,19 @@
 import { useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { getResourceById, getResources } from '../../api/resources';
+import { getResourceById, getResources, updateResource } from '../../api/resources';
 import { listAllocations, createAllocation, approveAllocation, rejectAllocation, CreateAllocationRequest, ApproveAllocationRequest } from '@/api/allocations';
 import { projectsApi } from '@/api/projects';
 import AllocationList from '@/components/allocation/AllocationList';
 import AllocationModal from '@/components/allocation/AllocationModal';
 import AllocationApprovalPanel from '@/components/allocation/AllocationApprovalPanel';
+import type { Resource } from '@/types';
 
 type TabType = 'details' | 'assignments' | 'rate-history';
 
 interface CreateAllocationForm {
   resourceId: number | null;
   projectId: number | null;
-  activityId: number | null;
   weekStartDate: string;
   hours: string;
   notes: string;
@@ -26,6 +26,17 @@ export default function ResourceDetail() {
   const [activeTab, setActiveTab] = useState<TabType>('assignments');
   const [modalOpen, setModalOpen] = useState(false);
   const [currentUserId] = useState(1);
+  const [editMode, setEditMode] = useState(false);
+  const [editForm, setEditForm] = useState({
+    name: '',
+    externalId: '',
+    costCenterId: '',
+    billableTeamCode: '',
+    category: '',
+    skill: '',
+    level: 1,
+    isBillable: true,
+  });
 
   const { data: resource, isLoading: loadingResource } = useQuery({
     queryKey: ['resource', resourceId],
@@ -59,8 +70,7 @@ export default function ResourceDetail() {
       const request: CreateAllocationRequest = {
         resourceId: form.resourceId,
         projectId: form.projectId,
-        activityId: form.activityId || undefined,
-        weekStartDate: form.weekStartDate,
+        weekStart: form.weekStartDate,
         hours: parseFloat(form.hours),
         notes: form.notes || undefined,
       };
@@ -83,6 +93,15 @@ export default function ResourceDetail() {
     mutationFn: (request: ApproveAllocationRequest) => rejectAllocation(request),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['allocations'] });
+    },
+  });
+
+  const updateResourceMutation = useMutation({
+    mutationFn: (data: { id: number; resource: Partial<Resource> }) =>
+      updateResource(data.id, data.resource),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['resource', resourceId] });
+      setEditMode(false);
     },
   });
 
@@ -154,7 +173,134 @@ export default function ResourceDetail() {
 
       {/* Tab Content */}
       {activeTab === 'details' && (
-        <div className="grid grid-cols-2 gap-6">
+        <div className="space-y-6">
+          <div className="flex items-center justify-between">
+            <h2 className="text-lg font-bold text-gray-900">Resource Details</h2>
+            {!editMode ? (
+              <button
+                onClick={() => {
+                  setEditForm({
+                    name: resource.name || '',
+                    externalId: resource.externalId || '',
+                    costCenterId: resource.costCenterId || '',
+                    billableTeamCode: resource.billableTeamCode || '',
+                    category: resource.category || '',
+                    skill: resource.skill || '',
+                    level: resource.level || 1,
+                    isBillable: resource.isBillable ?? true,
+                  });
+                  setEditMode(true);
+                }}
+                className="px-3 py-1.5 text-sm font-medium text-white rounded-lg"
+                style={{ backgroundColor: '#209d9d' }}
+              >
+                Edit
+              </button>
+            ) : (
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setEditMode(false)}
+                  className="px-3 py-1.5 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => updateResourceMutation.mutate({ id: resourceId, resource: editForm as Partial<Resource> })}
+                  disabled={updateResourceMutation.isPending}
+                  className="px-3 py-1.5 text-sm font-medium text-white rounded-lg"
+                  style={{ backgroundColor: '#209d9d', opacity: updateResourceMutation.isPending ? 0.5 : 1 }}
+                >
+                  {updateResourceMutation.isPending ? 'Saving...' : 'Save'}
+                </button>
+              </div>
+            )}
+          </div>
+
+          {editMode ? (
+            <div className="grid grid-cols-2 gap-6">
+              <div className="p-4 rounded-lg border border-gray-200 bg-white shadow-sm space-y-4">
+                <h3 className="text-sm font-semibold text-gray-500 mb-3">Basic Information</h3>
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">External ID</label>
+                  <input
+                    type="text"
+                    value={editForm.externalId}
+                    onChange={(e) => setEditForm({ ...editForm, externalId: e.target.value })}
+                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">Name</label>
+                  <input
+                    type="text"
+                    value={editForm.name}
+                    onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
+                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">Cost Center</label>
+                  <input
+                    type="text"
+                    value={editForm.costCenterId}
+                    onChange={(e) => setEditForm({ ...editForm, costCenterId: e.target.value })}
+                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">Billable Team</label>
+                  <input
+                    type="text"
+                    value={editForm.billableTeamCode}
+                    onChange={(e) => setEditForm({ ...editForm, billableTeamCode: e.target.value })}
+                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg"
+                  />
+                </div>
+              </div>
+
+              <div className="p-4 rounded-lg border border-gray-200 bg-white shadow-sm space-y-4">
+                <h3 className="text-sm font-semibold text-gray-500 mb-3">Skills & Status</h3>
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">Category</label>
+                  <input
+                    type="text"
+                    value={editForm.category}
+                    onChange={(e) => setEditForm({ ...editForm, category: e.target.value })}
+                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">Skill</label>
+                  <input
+                    type="text"
+                    value={editForm.skill}
+                    onChange={(e) => setEditForm({ ...editForm, skill: e.target.value })}
+                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">Level</label>
+                  <input
+                    type="number"
+                    value={editForm.level}
+                    onChange={(e) => setEditForm({ ...editForm, level: parseInt(e.target.value) || 1 })}
+                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg"
+                  />
+                </div>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    id="isBillable"
+                    checked={editForm.isBillable}
+                    onChange={(e) => setEditForm({ ...editForm, isBillable: e.target.checked })}
+                    className="w-4 h-4 rounded"
+                  />
+                  <label htmlFor="isBillable" className="text-sm text-gray-700">Billable</label>
+                </div>
+              </div>
+            </div>
+          ) : (
+          <div className="grid grid-cols-2 gap-6">
           <div className="p-4 rounded-lg border border-gray-200 bg-white shadow-sm">
             <h3 className="text-sm font-semibold text-gray-500 mb-3">Basic Information</h3>
             <dl className="space-y-2">
@@ -210,6 +356,8 @@ export default function ResourceDetail() {
               </div>
             </dl>
           </div>
+        </div>
+          )}
         </div>
       )}
 

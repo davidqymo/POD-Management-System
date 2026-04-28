@@ -25,7 +25,7 @@ export interface CreateAllocationRequest {
   resourceId: number;
   projectId: number;
   activityId?: number | null;
-  weekStartDate: string;
+  weekStart: string;
   hours: number;
   notes?: string;
 }
@@ -68,5 +68,10 @@ export async function rejectAllocation(request: ApproveAllocationRequest): Promi
 
 export async function getAllocation(id: number): Promise<Allocation> {
   const response = await client.get<Allocation>(`/allocations/${id}`);
+  return response.data;
+}
+
+export async function updateAllocation(id: number, activityId: number | null): Promise<Allocation> {
+  const response = await client.post<Allocation>(`/allocations/update-activity?allocationId=${id}&activityId=${activityId}`);
   return response.data;
 }

@@ -1,12 +1,10 @@
 import { useState, useEffect } from 'react';
 import Modal from '../common/Modal';
 import type { ConstraintViolation } from '@/api/allocations';
-import { activitiesApi } from '@/api/projects';
 
 interface CreateAllocationForm {
   resourceId: number | null;
   projectId: number | null;
-  activityId: number | null;
   weekStartDate: string;
   hours: string;
   notes: string;
@@ -34,13 +32,10 @@ export default function AllocationModal({
   const [form, setForm] = useState<CreateAllocationForm>({
     resourceId: null,
     projectId: null,
-    activityId: null,
     weekStartDate: '',
     hours: '',
     notes: '',
   });
-  const [activities, setActivities] = useState<Array<{ id: number; name: string }>>([]);
-  const [loadingActivities, setLoadingActivities] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [violations, setViolations] = useState<ConstraintViolation[]>([]);
 
@@ -49,35 +44,13 @@ export default function AllocationModal({
       setForm({
         resourceId: defaultResourceId ?? null,
         projectId: defaultProjectId ?? null,
-        activityId: null,
         weekStartDate: '',
         hours: '',
         notes: '',
       });
-      setActivities([]);
       setViolations([]);
     }
   }, [open, defaultProjectId, defaultResourceId]);
-
-  // Load activities when project is selected
-  useEffect(() => {
-    if (form.projectId) {
-      setLoadingActivities(true);
-      activitiesApi.list(form.projectId)
-        .then((data: any) => {
-          setActivities(data || []);
-          setForm(prev => ({ ...prev, activityId: null }));
-        })
-        .catch(() => {
-          setActivities([]);
-        })
-        .finally(() => {
-          setLoadingActivities(false);
-        });
-    } else {
-      setActivities([]);
-    }
-  }, [form.projectId]);
 
   const handleSubmit = async () => {
     if (!form.resourceId || !form.projectId || !form.weekStartDate || !form.hours) {
@@ -117,7 +90,7 @@ export default function AllocationModal({
     <Modal
       open={open}
       onClose={handleClose}
-      title="Create Allocation"
+      title="Create Project-Level Allocation"
       size="lg"
       footer={
         <div className="flex items-center justify-between w-full">
@@ -145,6 +118,14 @@ export default function AllocationModal({
       }
     >
       <div className="space-y-6">
+        {/* Info Banner */}
+        <div className="p-3 rounded-lg bg-blue-50 border border-blue-200">
+          <p className="text-sm text-blue-800">
+            <strong>Project-Level Allocation:</strong> This allocates total hours to the project.
+            To assign hours to specific activities, edit the activity in the Schedule & Activities tab.
+          </p>
+        </div>
+
         {/* Required Fields Section */}
         <div className="grid grid-cols-2 gap-5">
           {/* Resource Selection */}
@@ -154,7 +135,13 @@ export default function AllocationModal({
             </label>
             <select
               value={form.resourceId ?? ''}
-              onChange={(e) => setForm({ ...form, resourceId: e.target.value ? Number(e.target.value) : null })}
+              onChange={(e) => {
+                try {
+                  setForm((prev) => ({ ...prev, resourceId: e.target.value ? Number(e.target.value) : null }));
+                } catch (err) {
+                  console.error('Error in resource selection:', err);
+                }
+              }}
               className="w-full px-3 py-2.5 text-sm border border-gray-300 rounded-lg bg-white focus:border-primary-600 focus:outline-none focus:ring-1 focus:ring-primary-600 transition-colors"
             >
               <option value="">Select resource...</option>
@@ -172,9 +159,13 @@ export default function AllocationModal({
             <select
               value={form.projectId ?? ''}
               onChange={(e) => {
-                e.preventDefault();
-                const value = e.target.value;
-                setForm({ ...form, projectId: value ? Number(value) : null });
+                try {
+                  e.preventDefault();
+                  const value = e.target.value;
+                  setForm((prev) => ({ ...prev, projectId: value ? Number(value) : null }));
+                } catch (err) {
+                  console.error('Error in project selection:', err);
+                }
               }}
               className="w-full px-3 py-2.5 text-sm border border-gray-300 rounded-lg bg-white focus:border-primary-600 focus:outline-none focus:ring-1 focus:ring-primary-600 transition-colors"
             >
@@ -183,27 +174,6 @@ export default function AllocationModal({
                 <option key={p.id} value={p.id}>{p.name}</option>
               ))}
             </select>
-          </div>
-
-          {/* Activity Selection */}
-          <div className="space-y-2">
-            <label className="flex items-center gap-1 text-sm font-semibold text-gray-700">
-              Activity <span className="text-gray-400 font-normal">(optional)</span>
-            </label>
-            <select
-              value={form.activityId ?? ''}
-              onChange={(e) => setForm({ ...form, activityId: e.target.value ? Number(e.target.value) : null })}
-              disabled={!form.projectId || loadingActivities}
-              className="w-full px-3 py-2.5 text-sm border border-gray-300 rounded-lg bg-white focus:border-primary-600 focus:outline-none focus:ring-1 focus:ring-primary-600 transition-colors disabled:bg-gray-100 disabled:text-gray-400"
-            >
-              <option value="">Select activity (optional)...</option>
-              {activities.map((a) => (
-                <option key={a.id} value={a.id}>{a.name}</option>
-              ))}
-            </select>
-            {form.projectId && loadingActivities && (
-              <p className="text-xs text-gray-400">Loading activities...</p>
-            )}
           </div>
 
           {/* Week Start Date */}
