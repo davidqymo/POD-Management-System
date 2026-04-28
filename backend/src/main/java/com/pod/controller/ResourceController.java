@@ -27,6 +27,11 @@ public class ResourceController {
         this.resourceService = resourceService;
     }
 
+    @GetMapping("/{id}")
+    public Resource getById(@PathVariable Long id) {
+        return resourceService.findById(id).orElseThrow(() -> new IllegalArgumentException("Resource not found: " + id));
+    }
+
     @GetMapping
     public Page<Resource> getAll(
             @RequestParam(required = false) String search,
