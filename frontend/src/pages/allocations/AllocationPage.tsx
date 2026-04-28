@@ -26,6 +26,7 @@ export default function AllocationPage() {
   const [modalOpen, setModalOpen] = useState(false);
   const [currentUserId] = useState(1);
   const [resourceFilter, setResourceFilter] = useState<string>('');
+  const [projectFilter, setProjectFilter] = useState<string>('');
 
   const { data: allocations = [], isLoading } = useQuery({
     queryKey: ['allocations'],
@@ -86,10 +87,12 @@ export default function AllocationPage() {
     await rejectMutation.mutateAsync(request);
   };
 
-  // Filter allocations by resource
-  const filteredAllocations = resourceFilter
-    ? allocations.filter((alloc: any) => alloc.resourceId === Number(resourceFilter))
-    : allocations;
+  // Filter allocations by resource and project
+  const filteredAllocations = allocations.filter((alloc: any) => {
+    const matchResource = !resourceFilter || alloc.resourceId === Number(resourceFilter);
+    const matchProject = !projectFilter || alloc.projectId === Number(projectFilter);
+    return matchResource && matchProject;
+  });
 
   return (
     <div className="p-6 space-y-6">
@@ -119,7 +122,7 @@ export default function AllocationPage() {
       {/* Filter Bar */}
       <div className="flex items-center gap-4 p-4 bg-gray-50 rounded-lg">
         <div className="flex items-center gap-2">
-          <label className="text-sm font-medium text-gray-700">Filter by Resource:</label>
+          <label className="text-sm font-medium text-gray-700">Resource:</label>
           <select
             value={resourceFilter}
             onChange={(e) => setResourceFilter(e.target.value)}
@@ -133,9 +136,24 @@ export default function AllocationPage() {
             ))}
           </select>
         </div>
-        {resourceFilter && (
+        <div className="flex items-center gap-2">
+          <label className="text-sm font-medium text-gray-700">Project:</label>
+          <select
+            value={projectFilter}
+            onChange={(e) => setProjectFilter(e.target.value)}
+            className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-primary-500"
+          >
+            <option value="">All Projects</option>
+            {projects.map((project: any) => (
+              <option key={project.id} value={project.id}>
+                {project.name}
+              </option>
+            ))}
+          </select>
+        </div>
+        {(resourceFilter || projectFilter) && (
           <button
-            onClick={() => setResourceFilter('')}
+            onClick={() => { setResourceFilter(''); setProjectFilter(''); }}
             className="text-sm text-primary-600 hover:text-primary-700"
           >
             Clear Filter
