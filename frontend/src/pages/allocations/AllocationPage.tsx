@@ -9,7 +9,6 @@ import {
   ApproveAllocationRequest
 } from '@/api/allocations';
 import { projectsApi, Project } from '@/api/projects';
-import AllocationList from '@/components/allocation/AllocationList';
 import AllocationModal from '@/components/allocation/AllocationModal';
 import AllocationApprovalPanel from '@/components/allocation/AllocationApprovalPanel';
 import { getResources } from '@/api/resources';
@@ -153,11 +152,134 @@ export default function AllocationPage() {
         currentUserId={currentUserId}
       />
 
-      {/* Allocation List */}
-      <AllocationList
-        allocations={filteredAllocations}
-        loading={isLoading}
-      />
+      {/* Allocation List - Hierarchical View */}
+      {isLoading ? (
+        <div className="flex items-center justify-center py-8">
+          <div className="w-6 h-6 border-2 border-brand-200 border-t-brand-500 rounded-full animate-spin" />
+        </div>
+      ) : filteredAllocations.length === 0 ? (
+        <div className="p-8 text-center text-gray-500 rounded-lg border border-gray-200">No allocations found.</div>
+      ) : (
+        <div className="space-y-4">
+          {/* Group allocations by resource + project */}
+          {(() => {
+            // Group allocations by resourceId
+            type ProjectGroup = { projectAllocs: any[]; activityAllocs: any[] };
+            type ResourceGroup = Record<number, ProjectGroup>;
+            const resourceGroups: Record<number, ResourceGroup> = {};
+            filteredAllocations.forEach((alloc: any) => {
+              if (!resourceGroups[alloc.resourceId]) {
+                resourceGroups[alloc.resourceId] = {};
+              }
+              if (!resourceGroups[alloc.resourceId][alloc.projectId]) {
+                resourceGroups[alloc.resourceId][alloc.projectId] = { projectAllocs: [], activityAllocs: [] };
+              }
+              if (!alloc.activityId) {
+                resourceGroups[alloc.resourceId][alloc.projectId].projectAllocs.push(alloc);
+              } else {
+                resourceGroups[alloc.resourceId][alloc.projectId].activityAllocs.push(alloc);
+              }
+            });
+
+            return Object.entries(resourceGroups).map(([resourceId, projectGroups]) => {
+              const firstProjectGroup = Object.values(projectGroups)[0] as ProjectGroup | undefined;
+              const resourceName = firstProjectGroup?.projectAllocs[0]?.resourceName ||
+                                   firstProjectGroup?.activityAllocs[0]?.resourceName || 'Unknown';
+
+              return (
+                <div key={resourceId} className="rounded-lg border border-gray-200 overflow-hidden">
+                  {/* Resource Header */}
+                  <div className="bg-gray-100 px-4 py-3">
+                    <span className="text-sm font-semibold text-gray-900">{resourceName}</span>
+                  </div>
+
+                  {Object.entries(projectGroups).map(([projectId, groups]) => {
+                    const projectAllocs = (groups as ProjectGroup).projectAllocs;
+                    const activityAllocs = (groups as ProjectGroup).activityAllocs;
+                    const projectName = projectAllocs[0]?.projectName || activityAllocs[0]?.projectName || 'Unknown Project';
+                    const totalProjectHours = projectAllocs.reduce((sum: number, a: any) => sum + (a.hours || 0), 0);
+                    const totalActivityHours = activityAllocs.reduce((sum: number, a: any) => sum + (a.hours || 0), 0);
+
+                    return (
+                      <div key={projectId} className="border-t border-gray-200">
+                        {/* Project Level Header */}
+                        <div className="bg-blue-50 px-4 py-3 flex items-center justify-between">
+                          <div className="flex items-center gap-3">
+                            <span className="text-sm font-semibold text-gray-900">{projectName}</span>
+                          </div>
+                          <div className="flex items-center gap-4 text-sm">
+                            <span className="text-gray-600">Total: <span className="font-medium text-blue-700">{totalProjectHours}h</span></span>
+                            <span className="text-gray-400">|</span>
+                            <span className="text-gray-600">Activities: <span className="font-medium text-purple-700">{totalActivityHours}h</span></span>
+                            <span className="text-gray-400">|</span>
+                            <span className={`font-medium ${totalProjectHours - totalActivityHours >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                              {totalProjectHours - totalActivityHours}h
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Project-level allocations */}
+                        {projectAllocs.length > 0 && (
+                          <table className="min-w-full">
+                            <thead className="bg-gray-50">
+                              <tr>
+                                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Week</th>
+                                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Hours</th>
+                                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-100">
+                              {projectAllocs.map((alloc: any) => (
+                                <tr key={alloc.id} className="hover:bg-gray-50">
+                                  <td className="px-4 py-2 text-sm text-gray-600">{alloc.weekStartDate}</td>
+                                  <td className="px-4 py-2 text-sm font-medium text-gray-900">{alloc.hours}h</td>
+                                  <td className="px-4 py-2">
+                                    <span className={`px-2 py-0.5 text-xs rounded-full ${alloc.status === 'APPROVED' ? 'bg-green-100 text-green-800' : alloc.status === 'PENDING' ? 'bg-yellow-100 text-yellow-800' : 'bg-red-100 text-red-800'}`}>
+                                      {alloc.status}
+                                    </span>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        )}
+
+                        {/* Activity-level allocations */}
+                        {activityAllocs.length > 0 && (
+                          <div className="border-t border-gray-100">
+                            <table className="min-w-full">
+                              <tbody className="divide-y divide-gray-100">
+                                {activityAllocs.map((alloc: any) => (
+                                  <tr key={alloc.id} className="hover:bg-gray-50">
+                                    <td className="px-6 py-2 text-sm text-gray-500">{alloc.activityName || '—'}</td>
+                                    <td className="px-4 py-2 text-sm text-gray-600">{alloc.weekStartDate}</td>
+                                    <td className="px-4 py-2 text-sm font-medium text-gray-900">{alloc.hours}h</td>
+                                    <td className="px-4 py-2">
+                                      <span className={`px-2 py-0.5 text-xs rounded-full ${alloc.status === 'APPROVED' ? 'bg-green-100 text-green-800' : alloc.status === 'PENDING' ? 'bg-yellow-100 text-yellow-800' : 'bg-red-100 text-red-800'}`}>
+                                        {alloc.status}
+                                      </span>
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+
+                        {totalActivityHours > totalProjectHours && (
+                          <div className="px-4 py-2 bg-red-50 border-t border-red-100 text-xs text-red-700">
+                            ⚠️ Warning: Activity allocations exceed project-level allocation by {totalActivityHours - totalProjectHours}h
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            });
+          })()}
+        </div>
+      )}
 
       {/* Create Modal */}
       <AllocationModal
