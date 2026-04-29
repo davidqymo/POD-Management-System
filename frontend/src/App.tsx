@@ -6,12 +6,14 @@ import { ProjectList } from './pages/projects/ProjectList'
 import ProjectForm from './pages/projects/ProjectForm'
 import ProjectDetail from './pages/projects/ProjectDetail'
 import AllocationPage from './pages/allocations/AllocationPage'
+import Dashboard from './pages/dashboard/Dashboard'
 
 function App() {
   return (
     <Layout>
       <Routes>
-        <Route path="/" element={<ResourceList />} />
+        <Route path="/" element={<Dashboard />} />
+        <Route path="/dashboard" element={<Dashboard />} />
         <Route path="/resources" element={<ResourceList />} />
         <Route path="/resources/:id" element={<ResourceDetail />} />
         <Route path="/projects" element={<ProjectList />} />

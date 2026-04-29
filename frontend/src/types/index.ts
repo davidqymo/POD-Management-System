@@ -48,3 +48,47 @@ export interface ApiError {
   error: string
   message: string
 }
+
+export interface DashboardSummary {
+  totalSupply: number
+  totalDemand: number
+  totalBudgetK: number
+  totalSpentK: number
+  overplanCount: number
+  utilizationRate: number
+  pendingAllocationCount: number
+  approvedAllocationCount: number
+}
+
+export interface MonthlyData {
+  month: string
+  value: number
+}
+
+export interface VarianceData {
+  projectId: number
+  projectName: string
+  budgetK: number
+  allocatedK: number
+  spentK: number
+  varianceK: number
+  variancePercent: number
+}
+
+export interface SkillSupply {
+  skill: string
+  count: number
+}
+
+export interface StatusCount {
+  status: string
+  count: number
+}
+
+export interface Utilization {
+  totalSupply: number
+  totalDemand: number
+  maxCapacity: number
+  utilizationPercent: number
+  availableCapacity: number
+}
