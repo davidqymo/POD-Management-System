@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line, Legend, PieChart, Pie, Cell } from 'recharts'
+import { ComposedChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line, Legend, PieChart, Pie, Cell } from 'recharts'
 import { getDashboardSummary, getSupplyDemandTrend, getVariance, getBurnRateTrend, getSupplyBySkill, getAllocationStatus } from '@/api/dashboard'
 
 const COLORS = ['#209d9d', '#f59e0b', '#ef4444', '#10b981', '#8b5cf6']
@@ -12,7 +12,7 @@ export default function Dashboard() {
 
   const { data: supplyDemand, isLoading: loadingSupplyDemand } = useQuery({
     queryKey: ['dashboard', 'supplyDemand'],
-    queryFn: () => getSupplyDemandTrend(6),
+    queryFn: () => getSupplyDemandTrend(12),
   })
 
   const { data: variance, isLoading: loadingVariance } = useQuery({
@@ -54,26 +54,28 @@ export default function Dashboard() {
       {/* Summary Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="bg-white rounded-lg border border-gray-200 p-4">
-          <p className="text-sm text-gray-500">Total Supply</p>
-          <p className="text-2xl font-bold text-gray-900">{summary?.totalSupply || 0}</p>
-          <p className="text-xs text-gray-400">Active resources</p>
+          <p className="text-sm text-gray-500">Total Supply (Dec-Nov)</p>
+          <p className="text-2xl font-bold text-gray-900">${summary?.totalSupplyK?.toFixed(0) || 0}K</p>
+          <p className="text-xs text-gray-400">{summary?.totalSupply || 0} resources × 12 months</p>
         </div>
         <div className="bg-white rounded-lg border border-gray-200 p-4">
-          <p className="text-sm text-gray-500">Total Demand (This Month)</p>
-          <p className="text-2xl font-bold text-gray-900">{summary?.totalDemand?.toFixed(0) || 0}h</p>
-          <p className="text-xs text-gray-400">Allocated hours</p>
+          <p className="text-sm text-gray-500">Total Demand</p>
+          <p className="text-2xl font-bold text-gray-900">${summary?.totalDemand?.toFixed(0) || 0}K</p>
+          <p className="text-xs text-gray-400">Project budgets</p>
         </div>
         <div className="bg-white rounded-lg border border-gray-200 p-4">
-          <p className="text-sm text-gray-500">Total Budget</p>
-          <p className="text-2xl font-bold text-gray-900">${summary?.totalBudgetK?.toFixed(0) || 0}K</p>
-          <p className="text-xs text-gray-400">All projects</p>
+          <p className="text-sm text-gray-500">Available Supply</p>
+          <p className="text-2xl font-bold" style={{ color: (summary?.availableSupplyK || 0) >= 0 ? '#10b981' : '#ef4444' }}>
+            ${summary?.availableSupplyK?.toFixed(0) || 0}K
+          </p>
+          <p className="text-xs text-gray-400">Supply - Demand</p>
         </div>
         <div className="bg-white rounded-lg border border-gray-200 p-4">
           <p className="text-sm text-gray-500">Utilization Rate</p>
           <p className="text-2xl font-bold" style={{ color: (summary?.utilizationRate || 0) > 80 ? '#ef4444' : '#209d9d' }}>
             {summary?.utilizationRate?.toFixed(1) || 0}%
           </p>
-          <p className="text-xs text-gray-400">{summary?.totalDemand?.toFixed(0) || 0}h / {(summary?.totalSupply || 0) * 144}h</p>
+          <p className="text-xs text-gray-400">{summary?.totalDemand?.toFixed(0) || 0}K / {summary?.totalSupplyK?.toFixed(0) || 0}K</p>
         </div>
       </div>
 
@@ -132,21 +134,24 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Supply vs Demand Chart */}
+      {/* Supply vs Demand Chart - Monthly Breakdown */}
       <div className="bg-white rounded-lg border border-gray-200 p-4">
-        <h3 className="text-sm font-semibold text-gray-700 mb-4">Monthly Demand Trend</h3>
+        <h3 className="text-sm font-semibold text-gray-700 mb-4">Monthly Supply & Demand (Dec - Nov)</h3>
         {loadingSupplyDemand ? (
           <div className="h-64 flex items-center justify-center">Loading...</div>
         ) : (
-          <ResponsiveContainer width="100%" height={250}>
-            <BarChart data={supplyDemand || []}>
+          <ResponsiveContainer width="100%" height={300}>
+            <ComposedChart data={supplyDemand || []}>
               <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="month" tick={{ fontSize: 12 }} />
-              <YAxis tick={{ fontSize: 12 }} />
-              <Tooltip />
+              <XAxis dataKey="month" tick={{ fontSize: 11 }} />
+              <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => `$${v}K`} />
+              <Tooltip formatter={(value: number) => [`$${value.toFixed(0)}K`, '']} />
               <Legend />
-              <Bar dataKey="value" name="Hours Allocated" fill="#209d9d" />
-            </BarChart>
+              {/* Supply as full bar */}
+              <Bar dataKey="supply" name="Supply" fill="#209d9d" barSize={40} />
+              {/* Demand as line overlay */}
+              <Line type="monotone" dataKey="demand" name="Allocated" stroke="#f59e0b" strokeWidth={3} dot={{fill: '#f59e0b', r: 4}} />
+            </ComposedChart>
           </ResponsiveContainer>
         )}
       </div>
@@ -164,7 +169,7 @@ export default function Dashboard() {
               <YAxis tick={{ fontSize: 12 }} />
               <Tooltip />
               <Legend />
-              <Line type="monotone" dataKey="value" name="Spent (K)" stroke="#f59e0b" strokeWidth={2} />
+              <Line type="monotone" dataKey="value" name="Allocated (K)" stroke="#f59e0b" strokeWidth={2} />
             </LineChart>
           </ResponsiveContainer>
         )}
@@ -182,8 +187,7 @@ export default function Dashboard() {
                 <tr>
                   <th className="px-4 py-2 text-left text-xs font-semibold text-gray-500 uppercase">Project</th>
                   <th className="px-4 py-2 text-right text-xs font-semibold text-gray-500 uppercase">Budget (K)</th>
-                  <th className="px-4 py-2 text-right text-xs font-semibold text-gray-500 uppercase">Allocated (K)</th>
-                  <th className="px-4 py-2 text-right text-xs font-semibold text-gray-500 uppercase">Spent (K)</th>
+                  <th className="px-4 py-2 text-right text-xs font-semibold text-gray-500 uppercase">Allocated (KUSD)</th>
                   <th className="px-4 py-2 text-right text-xs font-semibold text-gray-500 uppercase">Variance (K)</th>
                   <th className="px-4 py-2 text-right text-xs font-semibold text-gray-500 uppercase">Variance %</th>
                 </tr>
@@ -193,8 +197,7 @@ export default function Dashboard() {
                   <tr key={row.projectId} className="hover:bg-gray-50">
                     <td className="px-4 py-2 text-sm text-gray-900">{row.projectName}</td>
                     <td className="px-4 py-2 text-sm text-right text-gray-600">${row.budgetK.toFixed(1)}</td>
-                    <td className="px-4 py-2 text-sm text-right text-gray-600">${row.allocatedK.toFixed(1)}</td>
-                    <td className="px-4 py-2 text-sm text-right text-gray-600">${row.spentK.toFixed(1)}</td>
+                    <td className="px-4 py-2 text-sm text-right text-gray-600">{row.allocatedK.toFixed(1)}</td>
                     <td className={`px-4 py-2 text-sm text-right ${row.varianceK >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                       ${row.varianceK.toFixed(1)}
                     </td>
@@ -205,7 +208,7 @@ export default function Dashboard() {
                 ))}
                 {(!variance || variance.length === 0) && (
                   <tr>
-                    <td colSpan={6} className="px-4 py-4 text-center text-gray-500">No project data</td>
+                    <td colSpan={5} className="px-4 py-4 text-center text-gray-500">No project data</td>
                   </tr>
                 )}
               </tbody>

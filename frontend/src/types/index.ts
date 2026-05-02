@@ -8,6 +8,7 @@ export interface Resource {
   skill: string
   level: number
   status: ResourceStatus
+  functionalManager?: string
   isBillable: boolean
   isActive: boolean
   version: number
@@ -51,7 +52,9 @@ export interface ApiError {
 
 export interface DashboardSummary {
   totalSupply: number
+  totalSupplyK: number
   totalDemand: number
+  availableSupplyK: number
   totalBudgetK: number
   totalSpentK: number
   overplanCount: number
@@ -62,7 +65,8 @@ export interface DashboardSummary {
 
 export interface MonthlyData {
   month: string
-  value: number
+  supply: number
+  demand: number
 }
 
 export interface VarianceData {
@@ -91,4 +95,15 @@ export interface Utilization {
   maxCapacity: number
   utilizationPercent: number
   availableCapacity: number
+}
+
+export interface Rate {
+  id: number
+  costCenterId: string
+  billableTeamCode: string
+  monthlyRateK: number
+  effectiveFrom: string
+  effectiveTo: string | null
+  createdAt: string
+  updatedAt: string
 }

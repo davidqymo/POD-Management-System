@@ -2,17 +2,21 @@ package com.pod.service.dto;
 
 public class MonthlyDataDTO {
     private String month;
-    private double value;
+    private double supply;
+    private double demand;
 
     public MonthlyDataDTO() {}
 
-    public MonthlyDataDTO(String month, double value) {
+    public MonthlyDataDTO(String month, double supply, double demand) {
         this.month = month;
-        this.value = value;
+        this.supply = supply;
+        this.demand = demand;
     }
 
     public String getMonth() { return month; }
     public void setMonth(String month) { this.month = month; }
-    public double getValue() { return value; }
-    public void setValue(double value) { this.value = value; }
+    public double getSupply() { return supply; }
+    public void setSupply(double supply) { this.supply = supply; }
+    public double getDemand() { return demand; }
+    public void setDemand(double demand) { this.demand = demand; }
 }
