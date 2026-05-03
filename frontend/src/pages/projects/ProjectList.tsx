@@ -1,6 +1,9 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { projectsApi, Project } from '../../api/projects';
+import { listAllocations } from '@/api/allocations';
+import { ratesApi } from '@/api/rates';
+import { getResources } from '@/api/resources';
 
 const STATUS_CONFIG: Record<string, { bg: string; text: string; border: string; label: string }> = {
   REQUESTED: { bg: '#eff6ff', text: '#1d4ed8', border: '#3b82f6', label: 'Requested' },
@@ -10,25 +13,125 @@ const STATUS_CONFIG: Record<string, { bg: string; text: string; border: string; 
   CANCELLED: { bg: '#fee2e2', text: '#b91c1c', border: '#ef4444', label: 'Cancelled' },
 };
 
-const BUDGET_COLORS = [
-  { max: 25, bg: '#f0f7f7', accent: '#4db1b1' },
-  { max: 50, bg: '#fef3e6', accent: '#ee961f' },
-  { max: 75, bg: '#fce2c2', accent: '#cb7819' },
-  { max: 100, bg: '#fee2e2', accent: '#ef4444' },
-  { max: Infinity, bg: '#fee2e2', accent: '#b91c1c' },
-];
+// Generate fiscal year months (Dec to Nov)
+function getFiscalYearMonths(): { hcm: number; label: string }[] {
+  const months: { hcm: number; label: string }[] = [];
+  const now = new Date();
+  const currentYear = now.getFullYear();
+  const monthNames = ['Dec', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov'];
 
-function getBudgetColor(budget: number) {
-  return BUDGET_COLORS.find(b => budget <= b.max) || BUDGET_COLORS[0];
+  for (let i = 0; i < 12; i++) {
+    const monthIndex = (i + 11) % 12;
+    const year = i === 0 ? currentYear - 1 : currentYear;
+    const hcm = year * 100 + (monthIndex + 1);
+    months.push({ hcm, label: monthNames[i] });
+  }
+  return months;
+}
+
+// Calculate allocated cost from allocations using rates
+function calculateAllocatedCost(allocations: any[], resources: any[], rates: any[], projectId: number): { totalK: number; totalHours: number; noRateCount: number } {
+  const projectAllocations = allocations.filter((a: any) => a.projectId === projectId && a.isActive);
+  let totalK = 0;
+  let totalHours = 0;
+  let noRateCount = 0;
+
+  for (const alloc of projectAllocations) {
+    totalHours += alloc.hours || 0;
+    const resource = resources.find((r: any) => r.id === alloc.resourceId);
+    if (!resource) continue;
+
+    const rate = rates.find((r: any) =>
+      r.costCenterId === resource.costCenterId && r.billableTeamCode === resource.billableTeamCode
+    );
+    if (!rate) {
+      noRateCount++;
+      continue;
+    }
+
+    const hcm = (alloc.hours || 0) / 144; // 144 hours = 1 HCM
+    totalK += hcm * Number(rate.monthlyRateK);
+  }
+
+  return { totalK, totalHours, noRateCount };
+}
+
+// Mini calendar showing allocation density per month
+function AllocationCalendar({ projectId, allocations }: { projectId: number; allocations: any[] }) {
+  const months = getFiscalYearMonths();
+  const projectAllocs = allocations.filter((a: any) => a.projectId === projectId && a.isActive);
+
+  // Group allocations by HCM
+  const allocByMonth: Record<number, number> = {};
+  for (const alloc of projectAllocs) {
+    const hcm = alloc.hcm;
+    allocByMonth[hcm] = (allocByMonth[hcm] || 0) + alloc.hours;
+  }
+
+  // Calculate intensity (0-4 scale based on hours)
+  const maxHours = Math.max(...Object.values(allocByMonth), 144);
+
+  const getIntensity = (hours: number): string => {
+    if (hours === 0) return 'bg-gray-50';
+    const ratio = hours / maxHours;
+    if (ratio < 0.25) return 'bg-teal-100';
+    if (ratio < 0.5) return 'bg-teal-200';
+    if (ratio < 0.75) return 'bg-teal-300';
+    return 'bg-teal-500';
+  };
+
+  return (
+    <div className="mt-3">
+      <p className="text-[10px] uppercase tracking-wider text-gray-400 mb-2">Activity (Dec - Nov)</p>
+      <div className="flex gap-1">
+        {months.map((month) => {
+          const hours = allocByMonth[month.hcm] || 0;
+          const isCurrentMonth = month.hcm === new Date().getFullYear() * 100 + (new Date().getMonth() + 1);
+
+          return (
+            <div
+              key={month.hcm}
+              className={`flex-1 h-6 rounded text-[9px] font-medium flex items-center justify-center ${getIntensity(hours)} ${
+                isCurrentMonth ? 'ring-2 ring-teal-500 ring-offset-1' : ''
+              }`}
+              title={`${month.label}: ${hours > 0 ? hours + 'h' : 'No allocation'}`}
+            >
+              {month.label.charAt(0)}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
 }
 
 export function ProjectList() {
   const [page, setPage] = useState(0);
   const [status, setStatus] = useState('');
 
+  // Fetch projects
   const { data, isLoading } = useQuery({
     queryKey: ['projects', page, status],
     queryFn: () => projectsApi.list({ page, size: 20, status: status || undefined }),
+  });
+
+  // Fetch all allocations for calculating allocated cost
+  const { data: allocations = [] } = useQuery({
+    queryKey: ['allocations', 'all'],
+    queryFn: () => listAllocations(),
+  });
+
+  // Fetch all resources
+  const { data: resourcesData } = useQuery({
+    queryKey: ['resources', 'all'],
+    queryFn: () => getResources({ page: 0, size: 200 }),
+  });
+  const resources = (resourcesData as any)?.content || [];
+
+  // Fetch rates
+  const { data: rates = [] } = useQuery({
+    queryKey: ['rates'],
+    queryFn: () => ratesApi.list(),
   });
 
   const projects: Project[] = data?.data?.content || [];
@@ -128,10 +231,12 @@ export function ProjectList() {
           </a>
         </div>
       ) : (
-        <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))' }}>
+        <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(380px, 1fr))' }}>
           {projects.map((project, index) => {
             const statusStyle = STATUS_CONFIG[project.status] || STATUS_CONFIG.REQUESTED;
-            const budgetStyle = getBudgetColor(project.budgetTotalK);
+            const { totalK: allocatedCost } = calculateAllocatedCost(allocations, resources, rates, project.id);
+            const budgetTotalK = project.budgetTotalK || 0;
+            const usedPercent = budgetTotalK > 0 ? (allocatedCost / budgetTotalK) * 100 : 0;
 
             return (
               <a
@@ -199,26 +304,57 @@ export function ProjectList() {
                   </div>
                 </div>
 
-                {/* Card Footer */}
-                <div
-                  className="flex items-center justify-between pt-3"
-                  style={{ borderTop: '1px solid #f5f5f5' }}
-                >
-                  <div>
+                {/* Budget & Allocated Cost Row */}
+                <div className="grid grid-cols-2 gap-4 mb-3">
+                  <div className="p-3 rounded-lg" style={{ backgroundColor: '#fafafa' }}>
                     <p className="text-[10px] uppercase tracking-wider" style={{ color: '#a3a3a3' }}>
                       Budget
                     </p>
+                    <p className="text-lg font-bold" style={{ color: '#171717', fontFamily: 'var(--font-display)' }}>
+                      ${budgetTotalK}K
+                    </p>
+                  </div>
+                  <div
+                    className="p-3 rounded-lg"
+                    style={{
+                      backgroundColor: usedPercent > 100 ? '#fef2f2' : usedPercent > 80 ? '#fffbeb' : '#f0fdf4'
+                    }}
+                  >
+                    <p className="text-[10px] uppercase tracking-wider" style={{ color: '#a3a3a3' }}>
+                      Allocated Cost
+                    </p>
                     <p
-                      className="text-sm font-semibold"
+                      className="text-lg font-bold"
                       style={{
-                        color: budgetStyle.accent,
+                        color: usedPercent > 100 ? '#dc2626' : usedPercent > 80 ? '#d97706' : '#16a34a',
                         fontFamily: 'var(--font-display)'
                       }}
                     >
-                      ${project.budgetTotalK}K
+                      ${allocatedCost.toFixed(1)}K
                     </p>
+                    {budgetTotalK > 0 && (
+                      <div className="mt-1 h-1.5 rounded-full bg-gray-200 overflow-hidden">
+                        <div
+                          className="h-full rounded-full"
+                          style={{
+                            width: `${Math.min(usedPercent, 100)}%`,
+                            backgroundColor: usedPercent > 100 ? '#dc2626' : usedPercent > 80 ? '#d97706' : '#16a34a'
+                          }}
+                        />
+                      </div>
+                    )}
                   </div>
-                  <div className="text-right">
+                </div>
+
+                {/* Allocation Calendar */}
+                <AllocationCalendar projectId={project.id} allocations={allocations} />
+
+                {/* Card Footer */}
+                <div
+                  className="flex items-center justify-between pt-3 mt-3"
+                  style={{ borderTop: '1px solid #f5f5f5' }}
+                >
+                  <div className="text-left">
                     <p className="text-[10px] uppercase tracking-wider" style={{ color: '#a3a3a3' }}>
                       {project.startDate ? 'Timeline' : 'No dates'}
                     </p>
@@ -228,6 +364,21 @@ export function ProjectList() {
                         : '—'}
                     </p>
                   </div>
+                  {budgetTotalK > 0 && (
+                    <div className="text-right">
+                      <p className="text-[10px] uppercase tracking-wider" style={{ color: '#a3a3a3' }}>
+                        Budget Used
+                      </p>
+                      <p
+                        className="text-sm font-medium"
+                        style={{
+                          color: usedPercent > 100 ? '#dc2626' : usedPercent > 80 ? '#d97706' : '#16a34a'
+                        }}
+                      >
+                        {usedPercent.toFixed(0)}%
+                      </p>
+                    </div>
+                  )}
                 </div>
               </a>
             );
