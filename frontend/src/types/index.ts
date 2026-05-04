@@ -4,6 +4,7 @@ export interface Resource {
   name: string
   costCenterId: string
   billableTeamCode: string
+  l5TeamCode?: string
   category: ResourceCategory
   skill: string
   level: number
@@ -33,6 +34,8 @@ export interface ResourceFilters {
   skill?: string
   costCenter?: string
   status?: string
+  functionalManager?: string
+  l5TeamCode?: string
   page?: number
   size?: number
 }
@@ -106,4 +109,23 @@ export interface Rate {
   effectiveTo: string | null
   createdAt: string
   updatedAt: string
+}
+
+export interface ProjectActual {
+  id: number
+  resourceId: number
+  resourceName?: string
+  resourceExternalId?: string
+  clarityId: string
+  projectName: string
+  monthlyData: Record<string, number> // {"202512": 1.5, "202601": 2.0, ...}
+  source: 'IMPORT' | 'MANUAL'
+  importedAt?: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface ImportActualsResult {
+  successCount: number
+  errors: string[]
 }

@@ -6,6 +6,8 @@ import { listAllocations, createAllocation, CreateAllocationRequest } from '@/ap
 import { GanttChart } from '../../components/project/GanttChart';
 import AllocationModal from '@/components/allocation/AllocationModal';
 import { getResources } from '@/api/resources';
+import { ratesApi } from '@/api/rates';
+import { getActualsByClarityId, createOrUpdateActual, deleteActual } from '@/api/actuals';
 
 const STATUS_CONFIG: Record<string, { bg: string; text: string; border: string; label: string }> = {
   REQUESTED: { bg: '#eff6ff', text: '#1d4ed8', border: '#3b82f6', label: 'Requested' },
@@ -22,8 +24,8 @@ export default function ProjectDetail() {
   const projectId = Number(id);
 
   const [showActivityForm, setShowActivityForm] = useState(false);
-  const [scheduleView, setScheduleView] = useState<'list' | 'gantt'>('list');
   const [activeTab, setActiveTab] = useState<'summary' | 'resources' | 'schedule'>('resources');
+  const [displayMode, setDisplayMode] = useState<'hcm' | 'usd'>('hcm');
   const [showEditForm, setShowEditForm] = useState(false);
   const [editForm, setEditForm] = useState({
     name: '',
@@ -61,12 +63,22 @@ export default function ProjectDetail() {
     hours: '',
     weekStartDate: '',
   });
+  // State for actuals editing - moved outside map to fix hooks violation
+  const [actualsEditValues, setActualsEditValues] = useState<Record<number, Record<string, string>>>({});
+  const [actualsSavingId, setActualsSavingId] = useState<number | null>(null);
+
+  // Helper to get milestone status - backend returns "milestone", frontend expects "isMilestone"
+  const getIsMilestone = (activity: any) => activity.isMilestone || activity.milestone || false;
+
+  // Convert hours to HCM (144 hours = 1 HCM)
+  const hoursToHcm = (hours: number) => (hours / 144).toFixed(2);
 
   // Fetch project data
   const { data: project, isLoading } = useQuery({
     queryKey: ['project', projectId],
     queryFn: () => projectsApi.get(projectId),
     enabled: !!projectId,
+    staleTime: 0, // Always fetch fresh data
   });
 
   // Fetch activities
@@ -81,6 +93,63 @@ export default function ProjectDetail() {
     queryKey: ['allocations', 'project', projectId],
     queryFn: () => listAllocations({ projectId }),
     enabled: !!projectId,
+  });
+
+  // Fetch actuals for this project
+  // Only extract clarityId AFTER project has loaded to avoid stale/empty state
+  const projectData = project?.data;
+  let clarityId = '';
+  let hasClarityId = false;
+  if (!isLoading && projectData) {
+    clarityId = projectData?.clarityId || projectData?.requestId || projectData?.name || '';
+    hasClarityId = !!projectData?.clarityId;
+  }
+  console.log('ProjectDetail DEBUG - projectId:', projectId, 'isLoading:', isLoading, 'project exists:', !!projectData, 'project name:', projectData?.name, 'clarityId:', projectData?.clarityId, 'hasClarityId:', hasClarityId);
+  const { data: actualsData = [], isLoading: actualsLoading } = useQuery({
+    queryKey: ['projectActuals', clarityId],
+    queryFn: () => getActualsByClarityId(clarityId),
+    enabled: !!clarityId,
+  });
+
+  // Save actual mutation
+  const saveActualMutation = useMutation({
+    mutationFn: async ({ resourceId, monthlyData, clarityId: cid }: { resourceId: number; monthlyData: Record<string, number> | null; clarityId: string }) => {
+      console.log('saveActualMutation called', { resourceId, monthlyData, clarityId: cid });
+      if (!cid) {
+        throw new Error('CLARITY_ID_MISSING: Project must have a Clarity ID to manage actual consumption. Please set the Clarity ID in project settings first.');
+      }
+      const result = await createOrUpdateActual(cid, {
+        resourceId,
+        projectName: project?.data?.name || '',
+        monthlyData: monthlyData || {},
+      });
+      console.log('createOrUpdateActual result:', result);
+      return result;
+    },
+    onSuccess: (_data, vars) => {
+      console.log('Actual saved successfully, invalidating queries for', vars.clarityId);
+      queryClient.invalidateQueries({ queryKey: ['projectActuals', vars.clarityId] });
+    },
+    onError: (error: any) => {
+      console.error('Error saving actual:', error?.message || error?.response?.data || error);
+      const errorMsg = error?.message || error?.response?.data?.error || 'Unknown error';
+      if (errorMsg.includes('CLARITY_ID_MISSING')) {
+        alert('Cannot save actual consumption: Project must have a Clarity ID. Please set the Clarity ID in project settings first.');
+      } else {
+        alert('Error saving actual: ' + errorMsg);
+      }
+    },
+  });
+
+  // Delete actual mutation
+  const deleteActualMutation = useMutation({
+    mutationFn: async (id: number) => {
+      if (!clarityId) return;
+      await deleteActual(clarityId, id);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['projectActuals', clarityId] });
+    },
   });
 
   // Status transition mutations
@@ -137,6 +206,12 @@ export default function ProjectDetail() {
     queryFn: () => getResources({ page: 0, size: 200 }),
   });
   const allResources = (resourcesData as any)?.content || [];
+
+  // Fetch rates for USD calculation
+  const { data: rates = [] } = useQuery({
+    queryKey: ['rates'],
+    queryFn: () => ratesApi.list(),
+  });
 
   // Update project - direct function (not useMutation to avoid closure issues)
   const updateProject = async () => {
@@ -555,118 +630,317 @@ export default function ProjectDetail() {
         <div className="space-y-4">
           <div className="flex items-center justify-between">
             <h3 className="text-lg font-semibold">Resources Allocated to This Project</h3>
-            <button
-              onClick={() => setShowAllocModal(true)}
-              className="px-4 py-2 rounded-lg font-medium text-white text-sm"
-              style={{ background: 'linear-gradient(135deg, #209d9d 0%, #0D4F4F 100%)' }}
-            >
-              + Add Allocation
-            </button>
+            <div className="flex items-center gap-3">
+              <div className="flex rounded-lg overflow-hidden" style={{ border: '1px solid #e5e5e5' }}>
+                <button
+                  onClick={() => setDisplayMode('hcm')}
+                  className="px-3 py-1.5 text-sm font-medium transition-colors"
+                  style={{
+                    backgroundColor: displayMode === 'hcm' ? '#209d9d' : '#ffffff',
+                    color: displayMode === 'hcm' ? 'white' : '#525252'
+                  }}
+                >
+                  HCM
+                </button>
+                <button
+                  onClick={() => setDisplayMode('usd')}
+                  className="px-3 py-1.5 text-sm font-medium transition-colors"
+                  style={{
+                    backgroundColor: displayMode === 'usd' ? '#209d9d' : '#ffffff',
+                    color: displayMode === 'usd' ? 'white' : '#525252'
+                  }}
+                >
+                  USD
+                </button>
+              </div>
+              <button
+                onClick={() => setShowAllocModal(true)}
+                className="px-4 py-2 rounded-lg font-medium text-white text-sm"
+                style={{ background: 'linear-gradient(135deg, #209d9d 0%, #0D4F4F 100%)' }}
+              >
+                + Add Allocation
+              </button>
+            </div>
           </div>
           {allocationsLoading ? (
             <div className="flex items-center justify-center py-8"><div className="w-6 h-6 border-2 border-brand-200 border-t-brand-500 rounded-full animate-spin" /></div>
           ) : !allocationsData || allocationsData.length === 0 ? (
             <div className="p-8 text-center text-gray-500 rounded-lg border border-gray-200">No resources allocated to this project yet.</div>
           ) : (
-            <div className="space-y-4">
-              {/* Group allocations by resource */}
-              {(() => {
-                // Group allocations by resource
-                const resourceGroups: Record<number, { projectAllocs: any[]; activityAllocs: any[] }> = {};
-                allocationsData.forEach((alloc: any) => {
-                  if (!resourceGroups[alloc.resourceId]) {
-                    resourceGroups[alloc.resourceId] = { projectAllocs: [], activityAllocs: [] };
-                  }
-                  if (!alloc.activityId) {
-                    resourceGroups[alloc.resourceId].projectAllocs.push(alloc);
-                  } else {
-                    resourceGroups[alloc.resourceId].activityAllocs.push(alloc);
-                  }
-                });
+            <div className="overflow-x-auto border rounded-lg">
+              <table className="min-w-full">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Resource</th>
+                    {(() => {
+                      const months = [];
+                      const now = new Date();
+                      const currentYear = now.getFullYear();
+                      const monthNames = ['Dec', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov'];
+                      for (let i = 0; i < 12; i++) {
+                        const year = i === 0 ? currentYear - 1 : currentYear;
+                        months.push({ label: monthNames[i], year: year });
+                      }
+                      return months.map((m, idx) => (
+                        <th key={idx} className="px-2 py-3 text-center text-xs font-semibold text-gray-500 uppercase min-w-[70px]">
+                          {m.label}
+                        </th>
+                      ));
+                    })()}
+                    <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase">Total</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {(() => {
+                    // Group allocations by resource
+                    const resourceGroups: Record<number, { name: string; hoursByHcm: Record<number, number> }> = {};
+                    allocationsData.forEach((alloc: any) => {
+                      if (!resourceGroups[alloc.resourceId]) {
+                        resourceGroups[alloc.resourceId] = { name: alloc.resourceName || 'Unknown', hoursByHcm: {} };
+                      }
+                      const hcm = alloc.hcm || parseInt((alloc.weekStartDate || '').replace(/-/g, '').slice(0, 6));
+                      if (hcm) {
+                        resourceGroups[alloc.resourceId].hoursByHcm[hcm] = (resourceGroups[alloc.resourceId].hoursByHcm[hcm] || 0) + (alloc.hours || 0);
+                      }
+                    });
 
-                return Object.entries(resourceGroups).map(([resourceId, groups]) => {
-                  const projectAllocs = groups.projectAllocs;
-                  const activityAllocs = groups.activityAllocs;
-                  const resourceName = projectAllocs[0]?.resourceName || activityAllocs[0]?.resourceName || 'Unknown';
-                  const totalProjectHours = projectAllocs.reduce((sum: number, a: any) => sum + (a.hours || 0), 0);
-                  const totalActivityHours = activityAllocs.reduce((sum: number, a: any) => sum + (a.hours || 0), 0);
+                    // Generate fiscal year HCMs
+                    const fyMonths: number[] = [];
+                    const now = new Date();
+                    const currentYear = now.getFullYear();
+                    for (let i = 0; i < 12; i++) {
+                      const monthIndex = (i + 11) % 12;
+                      const year = i === 0 ? currentYear - 1 : currentYear;
+                      fyMonths.push(year * 100 + (monthIndex + 1));
+                    }
 
-                  return (
-                    <div key={resourceId} className="rounded-lg border border-gray-200 overflow-hidden">
-                      {/* Project Level Header */}
-                      <div className="bg-blue-50 px-4 py-3 flex items-center justify-between">
-                        <div className="flex items-center gap-3">
-                          <span className="text-sm font-semibold text-gray-900">{resourceName}</span>
-                        </div>
-                        <div className="flex items-center gap-4 text-sm">
-                          <span className="text-gray-600">Total: <span className="font-medium text-blue-700">{totalProjectHours}h</span></span>
-                          <span className="text-gray-400">|</span>
-                          <span className="text-gray-600">Allocated: <span className="font-medium text-purple-700">{totalActivityHours}h</span></span>
-                          <span className="text-gray-400">|</span>
-                          <span className="text-gray-600">Available: <span className={`font-medium ${totalProjectHours - totalActivityHours > 0 ? 'text-green-600' : 'text-red-600'}`}>{totalProjectHours - totalActivityHours}h</span></span>
-                        </div>
-                      </div>
+                    // Helper to get rate for a resource
+                    const getResourceRate = (resourceId: number) => {
+                      const resource = allResources.find((r: any) => r.id === resourceId);
+                      if (!resource) return 0;
+                      const rate = rates.find((r: any) => r.costCenterId === resource.costCenterId && r.billableTeamCode === resource.billableTeamCode);
+                      return rate ? Number(rate.monthlyRateK) : 0;
+                    };
 
-                      {/* Project-level allocations */}
-                      {projectAllocs.length > 0 && (
-                        <table className="min-w-full">
-                          <thead className="bg-gray-50">
-                            <tr>
-                              <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Week</th>
-                              <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Hours</th>
-                              <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-gray-100">
-                            {projectAllocs.map((alloc: any) => (
-                              <tr key={alloc.id} className="hover:bg-gray-50">
-                                <td className="px-4 py-2 text-sm text-gray-600">{alloc.weekStartDate}</td>
-                                <td className="px-4 py-2 text-sm font-medium text-gray-900">{alloc.hours}h</td>
-                                <td className="px-4 py-2">
-                                  <span className={`px-2 py-0.5 text-xs rounded-full ${alloc.status === 'APPROVED' ? 'bg-green-100 text-green-800' : alloc.status === 'PENDING' ? 'bg-yellow-100 text-yellow-800' : 'bg-red-100 text-red-800'}`}>
-                                    {alloc.status}
+                    // Helper to format value
+                    const formatValue = (hours: number, resourceId: number) => {
+                      if (hours === 0) return '—';
+                      if (displayMode === 'hcm') {
+                        return hoursToHcm(hours);
+                      } else {
+                        const rate = getResourceRate(resourceId);
+                        const hcm = hours / 144;
+                        return `$${(hcm * rate).toFixed(1)}K`;
+                      }
+                    };
+
+                    return Object.entries(resourceGroups).map(([resourceId, data]) => {
+                      const totalHours = Object.values(data.hoursByHcm).reduce((s, v) => s + v, 0);
+                      const resourceRate = getResourceRate(Number(resourceId));
+                      const totalValue = displayMode === 'hcm'
+                        ? hoursToHcm(totalHours)
+                        : `$${((totalHours / 144) * resourceRate).toFixed(1)}K`;
+
+                      return (
+                        <tr key={resourceId} className="hover:bg-gray-50">
+                          <td className="px-4 py-3 text-sm font-medium text-gray-900">{data.name}</td>
+                          {fyMonths.map((hcm, idx) => {
+                            const hours = data.hoursByHcm[hcm] || 0;
+                            return (
+                              <td key={idx} className="px-2 py-3 text-center text-sm">
+                                {hours > 0 ? (
+                                  <span className="inline-flex items-center justify-center w-12 px-1 py-1 rounded text-xs font-medium"
+                                    style={{ backgroundColor: hours >= 144 ? '#d1fae5' : hours >= 72 ? '#e0f2fe' : '#f3f4f6', color: hours >= 144 ? '#065f46' : hours >= 72 ? '#075985' : '#525252' }}>
+                                    {formatValue(hours, Number(resourceId))}
                                   </span>
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      )}
-
-                      {/* Activity-level allocations (sub-items) */}
-                      {activityAllocs.length > 0 && (
-                        <div className="border-t border-gray-100">
-                          <table className="min-w-full">
-                            <tbody className="divide-y divide-gray-100">
-                              {activityAllocs.map((alloc: any) => (
-                                <tr key={alloc.id} className="hover:bg-gray-50">
-                                  <td className="px-6 py-2 text-sm text-gray-500">{alloc.activityName || '—'}</td>
-                                  <td className="px-4 py-2 text-sm text-gray-600">{alloc.weekStartDate}</td>
-                                  <td className="px-4 py-2 text-sm font-medium text-gray-900">{alloc.hours}h</td>
-                                  <td className="px-4 py-2">
-                                    <span className={`px-2 py-0.5 text-xs rounded-full ${alloc.status === 'APPROVED' ? 'bg-green-100 text-green-800' : alloc.status === 'PENDING' ? 'bg-yellow-100 text-yellow-800' : 'bg-red-100 text-red-800'}`}>
-                                      {alloc.status}
-                                    </span>
-                                  </td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-                      )}
-
-                      {/* Show warning if over-allocated */}
-                      {totalActivityHours > totalProjectHours && (
-                        <div className="px-4 py-2 bg-red-50 border-t border-red-100 text-xs text-red-700">
-                          ⚠️ Warning: Activity allocations exceed project-level allocation by {totalActivityHours - totalProjectHours}h
-                        </div>
-                      )}
-                    </div>
-                  );
-                });
-              })()}
+                                ) : (
+                                  <span className="text-gray-300">—</span>
+                                )}
+                              </td>
+                            );
+                          })}
+                          <td className="px-4 py-3 text-right text-sm font-semibold text-gray-900">{totalValue}</td>
+                        </tr>
+                      );
+                    });
+                  })()}
+                </tbody>
+              </table>
             </div>
           )}
+
+          {/* Actual Consumption Section */}
+          <div className="mt-8 pt-6 border-t border-gray-200">
+            {/* Validation warning if clarityId is missing */}
+            {!hasClarityId && (
+              <div className="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+                <div className="flex items-center gap-2">
+                  <svg className="w-5 h-5 text-yellow-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                  </svg>
+                  <span className="text-sm font-medium text-yellow-800">
+                    This project does not have a Clarity ID configured. Actual consumption cannot be managed until a Clarity ID is set in project settings.
+                  </span>
+                </div>
+              </div>
+            )}
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold">Actual Consumption (HCM)</h3>
+              <div className="text-sm text-gray-500">
+                Total: {(() => {
+                  let total = 0;
+                  actualsData.forEach((a: any) => {
+                    const values = Object.values(a.monthlyData || {}) as number[];
+                    values.forEach((v) => { total += (Number(v) || 0); });
+                  });
+                  return total.toFixed(1);
+                })()} HCM
+              </div>
+            </div>
+
+            {actualsLoading ? (
+              <div className="flex items-center justify-center py-8">
+                <div className="w-6 h-6 border-2 border-brand-200 border-t-brand-500 rounded-full animate-spin" />
+              </div>
+            ) : (
+              <div className="overflow-x-auto border rounded-lg">
+                <table className="min-w-full">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Resource</th>
+                      {(() => {
+                        const months = [];
+                        const now = new Date();
+                        const currentYear = now.getFullYear();
+                        const monthNames = ['Dec', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov'];
+                        for (let i = 0; i < 12; i++) {
+                          const year = i === 0 ? currentYear - 1 : currentYear;
+                          months.push({ label: monthNames[i], key: `${year}${String(i === 0 ? 12 : i).padStart(2, '0')}` });
+                        }
+                        return months.map((m, idx) => (
+                          <th key={idx} className="px-2 py-3 text-center text-xs font-semibold text-gray-500 uppercase min-w-[70px]">
+                            {m.label}
+                          </th>
+                        ));
+                      })()}
+                      <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {actualsData.map((actual: any) => {
+                      const editValues = actualsEditValues[actual.id] || {};
+                      const savingId = actualsSavingId;
+                      const months = [];
+                      const now = new Date();
+                      const currentYear = now.getFullYear();
+                      for (let i = 0; i < 12; i++) {
+                        const year = i === 0 ? currentYear - 1 : currentYear;
+                        months.push(`${year}${String(i === 0 ? 12 : i).padStart(2, '0')}`);
+                      }
+                      const getValue = (mKey: string) => editValues[mKey] ?? String(actual.monthlyData?.[mKey] ?? '');
+                      const hasChanges = (mKey: string) => {
+                        const current = String(actual.monthlyData?.[mKey] ?? '');
+                        const edited = getValue(mKey);
+                        return current !== edited && edited !== '';
+                      };
+                      const handleChange = (mKey: string, value: string) => {
+                        setActualsEditValues(prev => ({ ...prev, [actual.id]: { ...prev[actual.id], [mKey]: value } }));
+                      };
+                      const handleSave = async (mKey: string) => {
+                        const value = getValue(mKey);
+                        if (value === '' || isNaN(Number(value))) return;
+                        setActualsSavingId(Number(mKey));
+                        const newMonthlyData = { ...actual.monthlyData };
+                        newMonthlyData[mKey] = Number(value);
+                        await saveActualMutation.mutateAsync({
+                          resourceId: actual.resourceId,
+                          monthlyData: newMonthlyData,
+                          clarityId: clarityId,
+                        });
+                        setActualsEditValues(prev => {
+                          const cleared = { ...prev[actual.id] };
+                          delete cleared[mKey];
+                          return { ...prev, [actual.id]: cleared };
+                        });
+                        setActualsSavingId(null);
+                      };
+                      return (
+                        <tr key={actual.id} className="hover:bg-gray-50">
+                          <td className="px-4 py-2">
+                            <div className="font-medium">{actual.resourceName || 'Unknown'}</div>
+                            <div className="text-xs text-gray-500">{actual.resourceExternalId}</div>
+                          </td>
+                          {months.map((mKey) => (
+                            <td key={mKey} className="px-1 py-1">
+                              <div className="relative">
+                                <input
+                                  type="number"
+                                  step="0.1"
+                                  value={getValue(mKey)}
+                                  onChange={(e) => handleChange(mKey, e.target.value)}
+                                  onBlur={() => {
+                                    if (hasChanges(mKey)) handleSave(mKey);
+                                  }}
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter' && hasChanges(mKey)) handleSave(mKey);
+                                  }}
+                                  className="w-full rounded border border-gray-200 px-2 py-1 text-center text-sm"
+                                  placeholder="0"
+                                />
+                                {savingId === Number(mKey) && (
+                                  <div className="absolute inset-0 bg-white/50 flex items-center justify-center">
+                                    <div className="w-3 h-3 border border-primary-600 border-t-transparent rounded-full animate-spin" />
+                                  </div>
+                                )}
+                              </div>
+                            </td>
+                          ))}
+                          <td className="px-2 py-1 text-center">
+                            <button
+                              onClick={() => deleteActualMutation.mutate(actual.id)}
+                              className="text-red-600 hover:text-red-800 text-xs"
+                            >
+                              Delete
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                    {allocationsData && allocationsData.length > 0 && (
+                      <tr className="bg-gray-50">
+                        <td className="px-4 py-2">
+                          <select
+                            onChange={(e) => {
+                              if (e.target.value && clarityId) {
+                                saveActualMutation.mutate({
+                                  resourceId: Number(e.target.value),
+                                  monthlyData: null as any,
+                                  clarityId: clarityId,
+                                });
+                              }
+                            }}
+                            className="rounded border border-gray-200 px-2 py-1 text-sm"
+                            defaultValue=""
+                            disabled={!hasClarityId}
+                          >
+                            <option value="">+ Add Resource</option>
+                            {allocationsData
+                              .filter((alloc: any) => !actualsData.some((a: any) => a.resourceId === alloc.resourceId))
+                              .map((alloc: any) => (
+                                <option key={alloc.resourceId} value={alloc.resourceId}>
+                                  {alloc.resourceName || 'Unknown'} ({alloc.resourceExternalId || '-'})
+                                </option>
+                              ))}
+                          </select>
+                        </td>
+                        <td colSpan={13} />
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
         </div>
       )}
 
@@ -675,38 +949,14 @@ export default function ProjectDetail() {
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-4">
             <h2 className="text-lg font-semibold display-text" style={{ color: '#171717' }}>Schedule</h2>
-            <div className="flex rounded-lg overflow-hidden" style={{ border: '1px solid #e5e5e5' }}>
-              <button
-                onClick={() => setScheduleView('list')}
-                className="px-3 py-1.5 text-sm font-medium transition-colors"
-                style={{
-                  backgroundColor: scheduleView === 'list' ? '#209d9d' : '#ffffff',
-                  color: scheduleView === 'list' ? 'white' : '#525252'
-                }}
-              >
-                List
-              </button>
-              <button
-                onClick={() => setScheduleView('gantt')}
-                className="px-3 py-1.5 text-sm font-medium transition-colors"
-                style={{
-                  backgroundColor: scheduleView === 'gantt' ? '#209d9d' : '#ffffff',
-                  color: scheduleView === 'gantt' ? 'white' : '#525252'
-                }}
-              >
-                Gantt
-              </button>
-            </div>
           </div>
-          {scheduleView === 'list' && (
-            <button
-              onClick={() => setShowActivityForm(!showActivityForm)}
-              className="px-3 py-1.5 rounded-lg text-sm font-medium transition-colors"
-              style={{ backgroundColor: '#209d9d', color: 'white' }}
-            >
-              {showActivityForm ? 'Cancel' : '+ Add Activity'}
-            </button>
-          )}
+          <button
+            onClick={() => setShowActivityForm(!showActivityForm)}
+            className="px-3 py-1.5 rounded-lg text-sm font-medium transition-colors"
+            style={{ backgroundColor: '#209d9d', color: 'white' }}
+          >
+            {showActivityForm ? 'Cancel' : '+ Add Activity'}
+          </button>
         </div>
 
         {/* Activity Form */}
@@ -897,7 +1147,7 @@ export default function ProjectDetail() {
                         .map((alloc: any) => (
                           <div key={alloc.id} className="flex items-center justify-between p-2 rounded bg-gray-50 text-sm">
                             <span className="text-gray-700">{alloc.resourceName}</span>
-                            <span className="text-xs text-gray-500">{alloc.hours}h/week</span>
+                            <span className="text-xs text-gray-500">{hoursToHcm(alloc.hours)} HCM</span>
                           </div>
                         ))}
                       {allocationsData.filter((alloc: any) => alloc.activityId === selectedActivity?.id).length === 0 && (
@@ -1003,12 +1253,13 @@ export default function ProjectDetail() {
                               alert(`Cannot assign ${hours}h. Only ${available}h available for this activity.`);
                               return;
                             }
+                            const currentHcm = new Date().getFullYear() * 100 + (new Date().getMonth() + 1);
                             try {
                               await createAllocMutation.mutateAsync({
                                 resourceId: Number(resourceAssignForm.resourceId),
                                 projectId: projectId,
                                 activityId: selectedActivity?.id || undefined,
-                                weekStart: resourceAssignForm.weekStartDate,
+                                hcm: currentHcm,
                                 hours: hours,
                               });
                               setShowResourceAssignForm(false);
@@ -1063,34 +1314,39 @@ export default function ProjectDetail() {
           </div>
         )}
 
-        {/* Activities List or Gantt View */}
-        {scheduleView === 'gantt' ? (
+        {/* Gantt Chart - always shown first */}
+        <div className="mb-4">
           <GanttChart projectId={projectId} onActivityClick={(id) => {
             const activity = activities.find(a => a.id === id);
             if (activity) handleSelectActivity(activity);
           }} />
-        ) : (
-          <>
+        </div>
+
+        {/* Activities List - shown below Gantt */}
+        <div>
+          <h3 className="text-sm font-semibold mb-3" style={{ color: '#525252' }}>Activities</h3>
           {activitiesLoading ? (
-          <div className="flex items-center justify-center py-8">
-            <div className="w-6 h-6 border-2 border-brand-200 border-t-brand-500 rounded-full animate-spin" />
-          </div>
-        ) : activities.length > 0 ? (
-          <div className="space-y-2">
-            {activities.map((activity) => (
-              <div
-                key={activity.id}
-                className="flex items-center gap-4 p-3 rounded-lg transition-colors cursor-pointer hover:opacity-80"
-                style={{
-                  backgroundColor: activity.isMilestone ? '#faf5ff' : '#fafaf8',
-                  borderLeft: `3px solid ${activity.isMilestone ? '#a855f7' : '#209d9d'}`
-                }}
-                onClick={() => handleSelectActivity(activity)}
-              >
-                <div className="w-3 h-3 rounded-full" style={{ backgroundColor: activity.isMilestone ? '#a855f7' : '#209d9d' }} />
-                <div className="flex-1">
-                  <div className="text-sm font-medium" style={{ color: '#171717' }}>
-                    {activity.isMilestone && '◇ '}{activity.name}
+            <div className="flex items-center justify-center py-4">
+              <div className="w-6 h-6 border-2 border-brand-200 border-t-brand-500 rounded-full animate-spin" />
+            </div>
+          ) : activities.length > 0 ? (
+            <div className="space-y-2">
+              {activities.map((activity) => {
+                const isMs = getIsMilestone(activity);
+                return (
+                <div
+                  key={activity.id}
+                  className="flex items-center gap-4 p-3 rounded-lg transition-colors cursor-pointer hover:opacity-80"
+                  style={{
+                    backgroundColor: isMs ? '#faf5ff' : '#fafaf8',
+                    borderLeft: `3px solid ${isMs ? '#a855f7' : '#209d9d'}`
+                  }}
+                  onClick={() => handleSelectActivity(activity)}
+                >
+                  <div className="w-3 h-3 rounded-full" style={{ backgroundColor: isMs ? '#a855f7' : '#209d9d' }} />
+                  <div className="flex-1">
+                    <div className="text-sm font-medium" style={{ color: '#171717' }}>
+                      {isMs && '◇ '}{activity.name}
                   </div>
                   <div className="text-xs" style={{ color: '#737373' }}>
                     {activity.plannedStartDate || '—'} → {activity.plannedEndDate || '—'} ({activity.estimatedHours}h)
@@ -1110,7 +1366,8 @@ export default function ProjectDetail() {
                   </svg>
                 </button>
               </div>
-            ))}
+            );
+            })}
           </div>
         ) : (
           <div className="flex flex-col items-center justify-center py-12 rounded-lg" style={{ backgroundColor: '#fafaf8' }}>
@@ -1121,8 +1378,7 @@ export default function ProjectDetail() {
             <p className="text-xs mt-1" style={{ color: '#a3a3a3' }}>Click "Add Activity" to create the project schedule</p>
           </div>
         )}
-          </>
-        )}
+        </div>
       </div>
       )}
 
@@ -1140,14 +1396,17 @@ export default function ProjectDetail() {
         open={showAllocModal}
         onClose={() => setShowAllocModal(false)}
         onSubmit={async (form) => {
-          if (!form.resourceId || !form.projectId || !form.weekStartDate || !form.hours) {
-            throw new Error('Please fill all required fields');
+          const allocations = form.months
+            .filter((m: any) => m.hours > 0)
+            .map((m: any) => ({ hcm: m.hcm, hours: m.hours }));
+          if (allocations.length === 0) {
+            throw new Error('At least one month must have hours allocated');
           }
-          await createAllocMutation.mutateAsync({
-            resourceId: form.resourceId,
-            projectId: form.projectId,
-            weekStart: form.weekStartDate,
-            hours: parseFloat(form.hours),
+          const { createBulkAllocations } = await import('@/api/allocations');
+          await createBulkAllocations({
+            resourceId: form.resourceId!,
+            projectId: form.projectId!,
+            allocations,
             notes: form.notes || undefined,
           });
         }}
