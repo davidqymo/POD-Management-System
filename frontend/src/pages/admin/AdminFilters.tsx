@@ -11,11 +11,13 @@ export default function AdminFilters() {
   const queryClient = useQueryClient();
   const [selectedCategory, setSelectedCategory] = useState<string>('');
   const [newValue, setNewValue] = useState('');
+  const [newValueDesc, setNewValueDesc] = useState('');
   const [newCategoryKey, setNewCategoryKey] = useState('');
   const [newCategoryLabel, setNewCategoryLabel] = useState('');
   const [newCategoryDesc, setNewCategoryDesc] = useState('');
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editValue, setEditValue] = useState('');
+  const [editValueDesc, setEditValueDesc] = useState('');
   const [showNewCategory, setShowNewCategory] = useState(false);
   const [editingCategory, setEditingCategory] = useState<string | null>(null);
   const [editCategoryLabel, setEditCategoryLabel] = useState('');
@@ -105,13 +107,19 @@ export default function AdminFilters() {
     createMutation.mutate({
       category: selectedCategory,
       value: newValue.trim(),
+      description: newValueDesc.trim() || undefined,
       displayOrder: categoryFilters.length + 1,
     });
+    setNewValue('');
+    setNewValueDesc('');
   };
 
   const handleUpdate = (id: number) => {
     if (!editValue.trim()) return;
-    updateMutation.mutate({ id, data: { value: editValue.trim() } });
+    updateMutation.mutate({ id, data: { value: editValue.trim(), description: editValueDesc.trim() || undefined } as { value: string; description?: string } });
+    setEditingId(null);
+    setEditValue('');
+    setEditValueDesc('');
   };
 
   const handleDelete = (id: number) => {
@@ -295,22 +303,31 @@ export default function AdminFilters() {
 
         <div className="p-4">
           {/* Add new value */}
-          <div className="flex gap-2 mb-4">
+          <div className="space-y-2 mb-4">
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={newValue}
+                onChange={(e) => setNewValue(e.target.value)}
+                placeholder="Add new value..."
+                className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-none"
+                onKeyDown={(e) => e.key === 'Enter' && handleCreate()}
+              />
+              <button
+                onClick={handleCreate}
+                disabled={!newValue.trim() || createMutation.isPending}
+                className="px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {createMutation.isPending ? 'Adding...' : 'Add'}
+              </button>
+            </div>
             <input
               type="text"
-              value={newValue}
-              onChange={(e) => setNewValue(e.target.value)}
-              placeholder="Add new value..."
-              className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-none"
-              onKeyDown={(e) => e.key === 'Enter' && handleCreate()}
+              value={newValueDesc}
+              onChange={(e) => setNewValueDesc(e.target.value)}
+              placeholder="Description (optional)"
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-none"
             />
-            <button
-              onClick={handleCreate}
-              disabled={!newValue.trim() || createMutation.isPending}
-              className="px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {createMutation.isPending ? 'Adding...' : 'Add'}
-            </button>
           </div>
 
           {/* Filter list */}
@@ -328,39 +345,54 @@ export default function AdminFilters() {
                   className="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors"
                 >
                   {editingId === filter.id ? (
-                    <div className="flex gap-2 flex-1">
+                    <div className="flex flex-col gap-2 flex-1">
+                      <div className="flex gap-2">
+                        <input
+                          type="text"
+                          value={editValue}
+                          onChange={(e) => setEditValue(e.target.value)}
+                          className="flex-1 px-2 py-1 border border-gray-300 rounded text-sm"
+                          autoFocus
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') handleUpdate(filter.id);
+                            if (e.key === 'Escape') setEditingId(null);
+                          }}
+                        />
+                        <button
+                          onClick={() => handleUpdate(filter.id)}
+                          className="text-emerald-600 hover:text-emerald-800"
+                        >
+                          Save
+                        </button>
+                        <button
+                          onClick={() => setEditingId(null)}
+                          className="text-gray-500 hover:text-gray-700"
+                        >
+                          Cancel
+                        </button>
+                      </div>
                       <input
                         type="text"
-                        value={editValue}
-                        onChange={(e) => setEditValue(e.target.value)}
-                        className="flex-1 px-2 py-1 border border-gray-300 rounded text-sm"
-                        autoFocus
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') handleUpdate(filter.id);
-                          if (e.key === 'Escape') setEditingId(null);
-                        }}
+                        value={editValueDesc}
+                        onChange={(e) => setEditValueDesc(e.target.value)}
+                        placeholder="Description (optional)"
+                        className="px-2 py-1 border border-gray-300 rounded text-sm"
                       />
-                      <button
-                        onClick={() => handleUpdate(filter.id)}
-                        className="text-emerald-600 hover:text-emerald-800"
-                      >
-                        Save
-                      </button>
-                      <button
-                        onClick={() => setEditingId(null)}
-                        className="text-gray-500 hover:text-gray-700"
-                      >
-                        Cancel
-                      </button>
                     </div>
                   ) : (
                     <>
-                      <span className="font-medium text-gray-700">{filter.value}</span>
+                      <div className="flex flex-col">
+                        <span className="font-medium text-gray-700">{filter.value}</span>
+                        {filter.description && (
+                          <span className="text-xs text-gray-400">{filter.description}</span>
+                        )}
+                      </div>
                       <div className="flex gap-2">
                         <button
                           onClick={() => {
                             setEditingId(filter.id);
                             setEditValue(filter.value);
+                            setEditValueDesc(filter.description || '');
                           }}
                           className="text-gray-400 hover:text-amber-600 p-1"
                           title="Edit"
