@@ -17,6 +17,9 @@ export default function AdminFilters() {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editValue, setEditValue] = useState('');
   const [showNewCategory, setShowNewCategory] = useState(false);
+  const [editingCategory, setEditingCategory] = useState<string | null>(null);
+  const [editCategoryLabel, setEditCategoryLabel] = useState('');
+  const [editCategoryDesc, setEditCategoryDesc] = useState('');
 
   const { data: filters = [], isLoading } = useQuery({
     queryKey: ['admin', 'filters'],
@@ -122,6 +125,26 @@ export default function AdminFilters() {
     createCategoryMutation.mutate();
   };
 
+  const handleEditCategory = (cat: { key: string; label: string; description: string }) => {
+    setEditingCategory(cat.key);
+    setEditCategoryLabel(cat.label);
+    setEditCategoryDesc(cat.description);
+  };
+
+  const handleSaveCategory = () => {
+    // Find the filter that represents this category and update it
+    const categoryFilter = filters.find(f => f.category === editingCategory && f.value === editingCategory);
+    if (categoryFilter) {
+      updateMutation.mutate({
+        id: categoryFilter.id,
+        data: { value: editCategoryLabel, description: editCategoryDesc } as { value: string; description?: string }
+      });
+    }
+    setEditingCategory(null);
+    setEditCategoryLabel('');
+    setEditCategoryDesc('');
+  };
+
   return (
     <div className="p-6 max-w-5xl mx-auto">
       <div className="mb-6">
@@ -133,17 +156,59 @@ export default function AdminFilters() {
       {/* Category tabs */}
       <div className="flex flex-wrap gap-2 mb-6">
         {categories.map((cat) => (
-          <button
-            key={cat.key}
-            onClick={() => setSelectedCategory(cat.key)}
-            className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-              selectedCategory === cat.key
-                ? 'bg-emerald-600 text-white shadow-md'
-                : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-            }`}
-          >
-            {cat.label}
-          </button>
+          <div key={cat.key} className="flex items-center gap-1">
+            {editingCategory === cat.key ? (
+              <div className="flex items-center gap-1 bg-emerald-50 border border-emerald-300 rounded-lg px-2 py-1">
+                <input
+                  type="text"
+                  value={editCategoryLabel}
+                  onChange={(e) => setEditCategoryLabel(e.target.value)}
+                  className="px-2 py-1 text-sm border border-gray-300 rounded w-28"
+                  autoFocus
+                />
+                <button
+                  onClick={handleSaveCategory}
+                  className="text-emerald-600 hover:text-emerald-800 p-1"
+                  title="Save"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                  </svg>
+                </button>
+                <button
+                  onClick={() => setEditingCategory(null)}
+                  className="text-gray-500 hover:text-gray-700 p-1"
+                  title="Cancel"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={() => setSelectedCategory(cat.key)}
+                className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                  selectedCategory === cat.key
+                    ? 'bg-emerald-600 text-white shadow-md'
+                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                }`}
+              >
+                {cat.label}
+              </button>
+            )}
+            {!editingCategory && (
+              <button
+                onClick={() => handleEditCategory(cat)}
+                className="text-gray-400 hover:text-amber-600 p-1"
+                title="Edit category"
+              >
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                </svg>
+              </button>
+            )}
+          </div>
         ))}
         <button
           onClick={() => setShowNewCategory(true)}
