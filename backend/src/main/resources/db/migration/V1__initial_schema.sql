@@ -30,6 +30,24 @@ CREATE INDEX idx_resources_skill
     ON resources (skill)
     WHERE is_active = TRUE AND is_billable = TRUE;
 
+-- ========== cost_centers ==========
+CREATE TABLE IF NOT EXISTS cost_centers (
+    id BIGSERIAL PRIMARY KEY,
+    cost_center_id VARCHAR(20) NOT NULL UNIQUE,
+    description VARCHAR(100),
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
+);
+
+-- ========== skills ==========
+CREATE TABLE IF NOT EXISTS skills (
+    id BIGSERIAL PRIMARY KEY,
+    skill_name VARCHAR(50) NOT NULL UNIQUE,
+    category VARCHAR(30) NOT NULL,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
+);
+
 -- ========== rates ==========
 CREATE TABLE IF NOT EXISTS rates (
     id BIGSERIAL PRIMARY KEY,
@@ -137,9 +155,7 @@ CREATE TABLE IF NOT EXISTS allocations (
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
     updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
-    CONSTRAINT chk_allocation_status CHECK (status IN ('PENDING', 'APPROVED', 'REJECTED', 'LOCKED')),
-    CONSTRAINT uq_active_allocation UNIQUE (resource_id, week_start_date, status)
-        WHERE status IN ('PENDING', 'APPROVED') AND is_active = TRUE
+    CONSTRAINT chk_allocation_status CHECK (status IN ('PENDING', 'APPROVED', 'REJECTED', 'LOCKED'))
 );
 
 CREATE INDEX idx_allocations_resource_week ON allocations (resource_id, week_start_date)
@@ -166,9 +182,9 @@ CREATE TABLE IF NOT EXISTS holidays (
 
 CREATE UNIQUE INDEX uq_holiday_unique ON holidays (holiday_date, cost_center_filter);
 
--- ========== audit_log (partitioned by month) ==========
+-- ========== audit_log ==========
 CREATE TABLE IF NOT EXISTS audit_log (
-    id BIGSERIAL,
+    id BIGSERIAL PRIMARY KEY,
     entity_type VARCHAR(50) NOT NULL,
     entity_id BIGINT NOT NULL,
     field_name VARCHAR(100),
@@ -177,16 +193,8 @@ CREATE TABLE IF NOT EXISTS audit_log (
     changed_by_user_id BIGINT REFERENCES users(id),
     changed_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
     change_reason TEXT,
-    revision_type VARCHAR(10) NOT NULL CHECK (revision_type IN ('ADD', 'MOD', 'DEL')),
-    PRIMARY KEY (id, changed_at)
-) PARTITION BY RANGE (changed_at);
-
--- Create monthly partitions (2026 and forward)
-CREATE TABLE audit_log_2026_01 PARTITION OF audit_log
-    FOR VALUES FROM ('2026-01-01') TO ('2026-02-01');
-CREATE TABLE audit_log_2026_02 PARTITION OF audit_log
-    FOR VALUES FROM ('2026-02-01') TO ('2026-03-01');
--- Additional partitions created by PartitionMaintenanceTask in prod.
+    revision_type VARCHAR(10) NOT NULL CHECK (revision_type IN ('ADD', 'MOD', 'DEL'))
+);
 
 CREATE INDEX idx_audit_entity ON audit_log (entity_type, entity_id);
 CREATE INDEX idx_audit_changed_at ON audit_log (changed_at DESC);
@@ -202,11 +210,7 @@ CREATE TABLE IF NOT EXISTS notifications (
     is_read BOOLEAN NOT NULL DEFAULT FALSE,
     read_at TIMESTAMP WITH TIME ZONE,
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
-) PARTITION BY RANGE (created_at);
-
--- Initial partition: 2026
-CREATE TABLE notifications_2026_01 PARTITION OF notifications
-    FOR VALUES FROM ('2026-01-01') TO ('2026-02-01');
+);
 
 CREATE INDEX idx_notifications_recipient ON notifications (recipient_id, created_at DESC)
     WHERE is_read = FALSE;

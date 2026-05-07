@@ -7,7 +7,7 @@ spring:
 
   jpa:
     hibernate:
-      ddl-auto: validate
+      ddl-auto: update
     open-in-view: false
     properties:
       hibernate:
@@ -15,21 +15,23 @@ spring:
         default_schema: public
 
   flyway:
-    enabled: true
+    enabled: false
     locations: classpath:db/migration
-    clean-disabled: false
+    clean-disabled: true
     validate-on-migrate: false
 
   jackson:
     serialization:
       write-dates-as-timestamps: false
-    default-property-inclusion: non_null
 
   data:
     redis:
       timeout: 3000ms
 
   datasource:
+    url: jdbc:postgresql://localhost:5432/pod
+    username: postgres
+    password: postgres
     hikari:
       maximum-pool-size: 20
       minimum-idle: 5

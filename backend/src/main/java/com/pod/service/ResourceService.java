@@ -8,6 +8,8 @@ import jakarta.persistence.EntityManager;
 import jakarta.persistence.EntityNotFoundException;
 import jakarta.persistence.LockModeType;
 import jakarta.persistence.PersistenceContext;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
@@ -19,17 +21,39 @@ import java.util.Map;
 import java.util.Optional;
 
 /**
- * ResourceService — business logic for Resource entity lifecycle.
+ * ResourceService - Business logic layer for Resource entity lifecycle.
  *
- * T1.4: changeStatus() applies guarded state transitions with PESSIMISTIC_WRITE
- * locking to prevent concurrent edits, validates via Resource.isValidTransition(),
- * and records audit changes (stubbed here; real AuditService wired in REFACTOR).
+ * PROCESS FLOW:
+ * 1. Query Operations (read-only):
+ *    - findAllWithFilters() - Paginated search with dynamic filtering via JPA Specifications
+ *    - findAll() - Returns all active resources
+ *    - findById() - Returns single resource by ID
  *
- * T1.5: Added findAll(), findById(), create(), deactivate() for REST API.
+ * 2. Write Operations (with transaction):
+ *    - create() - Creates new resource, defaults status to ACTIVE if not specified
+ *    - updateFields() - Partial update using PESSIMISTIC_WRITE lock
+ *    - changeStatus() - State transition with validation and locking
+ *    - deactivate() - Soft delete (sets isActive=false)
+ *
+ * CONCURRENCY CONTROL:
+ * - All write operations use PESSIMISTIC_WRITE lock to prevent concurrent modification
+ * - Optimistic locking via @Version field provides secondary conflict detection
+ *
+ * FILTERING:
+ * - Supports filtering by: search, skill, costCenter, status, functionalManager, l5TeamCode
+ * - Search uses case-insensitive LIKE on name, externalId, costCenterId
+ * - Always filters for isActive=true to return only active records
+ *
+ * STATE MACHINE:
+ * - changeStatus() validates transitions via Resource.isValidTransition()
+ * - Invalid transitions throw InvalidStatusTransitionException
+ * - Transitions: ACTIVE->ON_LEAVE/TERMINATED, ON_LEAVE->ACTIVE, TERMINATED->(none)
  */
 @Service
 @Transactional
 public class ResourceService {
+
+    private static final Logger log = LoggerFactory.getLogger(ResourceService.class);
 
     private final ResourceRepository resourceRepository;
 
@@ -41,7 +65,7 @@ public class ResourceService {
     }
 
     @Transactional(readOnly = true)
-    public Page<Resource> findAllWithFilters(String search, String skill, String costCenter, String status, Pageable pageable) {
+    public Page<Resource> findAllWithFilters(String search, String skill, String costCenter, String status, String functionalManager, String l5TeamCode, Pageable pageable) {
         Specification<Resource> spec = Specification.where(null);
 
         if (search != null && !search.isBlank()) {
@@ -61,6 +85,12 @@ public class ResourceService {
         }
         if (status != null && !status.isBlank()) {
             spec = spec.and((root, query, cb) -> cb.equal(root.get("status"), ResourceStatus.valueOf(status)));
+        }
+        if (functionalManager != null && !functionalManager.isBlank()) {
+            spec = spec.and((root, query, cb) -> cb.equal(root.get("functionalManager"), functionalManager));
+        }
+        if (l5TeamCode != null && !l5TeamCode.isBlank()) {
+            spec = spec.and((root, query, cb) -> cb.equal(root.get("l5TeamCode"), l5TeamCode));
         }
         spec = spec.and((root, query, cb) -> cb.isTrue(root.get("isActive")));
 
@@ -131,8 +161,8 @@ public class ResourceService {
         resource.setStatus(newStatus);
         resourceRepository.save(resource);
 
-        // Record audit (GREEN: stub — simple log; REFACTOR will inject AuditService)
-        System.out.printf("[AUDIT] Resource %d status %s → %s : %s%n",
+        // Record audit - use proper logging
+        log.info("Resource {} status changed: {} -> {}, reason: {}",
             resourceId, resource.getStatus(), newStatus, reason);
     }
 
@@ -163,8 +193,17 @@ public class ResourceService {
         if (fields.containsKey("level") && fields.get("level") != null) {
             resource.setLevel(Integer.parseInt(fields.get("level").toString()));
         }
-        if (fields.containsKey("isBillable")) {
-            resource.setBillable(Boolean.parseBoolean(fields.get("isBillable").toString()));
+        if (fields.containsKey("functionalManager") && fields.get("functionalManager") != null) {
+            resource.setFunctionalManager(fields.get("functionalManager").toString());
+        }
+        if (fields.containsKey("l5TeamCode") && fields.get("l5TeamCode") != null) {
+            resource.setL5TeamCode(fields.get("l5TeamCode").toString());
+        }
+        if (fields.containsKey("skills") && fields.get("skills") != null) {
+            // Support multiple skills as JSON array or comma-separated string
+            resource.setSkill(fields.get("skills").toString());
+        } else if (fields.containsKey("skill") && fields.get("skill") != null) {
+            resource.setSkill(fields.get("skill").toString());
         }
 
         return resourceRepository.save(resource);

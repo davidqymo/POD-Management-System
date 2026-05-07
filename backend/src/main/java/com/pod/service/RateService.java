@@ -15,19 +15,36 @@ import java.util.Optional;
 import jakarta.persistence.EntityNotFoundException;
 
 /**
- * RateService — manages rate periods with contiguous month chains.
+ * RateService - Business logic for Rate entity and rate period management.
  *
- * T1.4: createRate() acquires PESSIMISTIC_WRITE lock on the currently active
- * rate for the same (costCenterId, billableTeamCode), validates that the
- * new effective_from date is exactly one month after the previous rate's
- * effective_from, closes the previous rate by setting effective_to, and
- * persists both with a single Optimistic Lock retry on conflict.
+ * PROCESS FLOW:
+ * 1. CREATE RATE (createRate):
+ *    a. Validate rate period (check for gaps in contiguous months)
+ *    b. Acquire PESSIMISTIC_WRITE lock on currently active rate
+ *    c. Close previous rate (set effectiveTo = new rate's effectiveFrom - 1 month)
+ *    d. Create new rate with PENDING status
  *
- * T1.5: Added findAll(), findById(), findActiveRate() for REST API.
+ * 2. UPDATE RATE:
+ *    a. Find rate by ID
+ *    b. Update rate values
+ *    c. Validate no overlapping periods
  *
- * Contiguity rule examples:
- *   prev = 202512; new = 202601 → OK (adjacent)
- *   prev = 202512; new = 202602 → GAP (Jan missing) → throws RatePeriodGapException
+ * 3. DELETE RATE (soft delete):
+ *    a. Set isActive=false
+ *    b. Cannot delete if there are allocation records referencing this rate
+ *
+ * CONSTRAINTS:
+ * - No gaps between rate periods (contiguous months)
+ * - Cannot have overlapping periods for same cost center + billable team
+ * - effectiveTo must be before next rate's effectiveFrom
+ *
+ * VALIDATION:
+ * - RatePeriodGapException: Thrown when new rate creates a gap in periods
+ * - Unique constraint violation on duplicate effective_from
+ *
+ * QUERY:
+ * - findActiveByCostCenterAndTeam: Get current rate for cost center + team
+ * - findByCostCenterAndBillableTeam: Get all rates (including historical)
  */
 @Service
 @Transactional

@@ -7,10 +7,10 @@ import lombok.NoArgsConstructor;
 
 import java.math.BigDecimal;
 import java.time.Instant;
-import java.time.LocalDate;
 
 /**
  * AllocationDTO — allocation record for API responses.
+ * Uses HCM (Headcount Month) in YYYYMM format.
  */
 @Data
 @NoArgsConstructor
@@ -24,7 +24,11 @@ public class AllocationDTO {
     private String projectName;
     private Long activityId;
     private String activityName;
-    private LocalDate weekStartDate;
+    /**
+     * HCM (Headcount Month) in YYYYMM format.
+     * e.g., 202512 = December 2025, 202601 = January 2026
+     */
+    private Integer hcm;
     private BigDecimal hours;
     private String status;  // PENDING, APPROVED, REJECTED, LOCKED
     private Integer version;

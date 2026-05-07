@@ -45,7 +45,21 @@
       "Bash(mvn spring-boot:run -DskipTests)",
       "Bash(taskkill *)",
       "Bash(npm run *)",
-      "Bash(powershell *)"
+      "Bash(powershell *)",
+      "Bash(findstr \"8080 5174\")",
+      "Bash(findstr \"5174\")",
+      "Bash(findstr \":8080\")",
+      "Bash(docker exec *)",
+      "Bash(docker start *)",
+      "Bash(npm test *)",
+      "Bash(mvn spring-boot:run)",
+      "Bash(findstr :8080)",
+      "Bash(cmd /c \"taskkill /F /PID 143256\")",
+      "Bash(findstr :5173)",
+      "Bash(findstr LISTENING)",
+      "Read(//c/Program Files/Google/Chrome/**)",
+      "Read(//c/Program Files \\(x86\\)/Google/Chrome/**)",
+      "Bash(grep -v \"^$\\\\|^\\\\s\")"
     ]
   }
 }

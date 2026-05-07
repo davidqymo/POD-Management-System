@@ -138,7 +138,19 @@ export default function AllocationPage() {
       return formatHcm(hours);
     } else {
       const usd = hoursToUsd(hours, resourceId);
-      return `$${usd.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+      return usd > 0 ? `$${usd.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}` : '—';
+    }
+  };
+
+  // Format total (uses resourceFilter when set, or first resource as fallback)
+  const formatTotal = (hours: number): string => {
+    if (displayUnit === 'HCM') {
+      return formatHcm(hours);
+    } else {
+      const resId = resourceFilter ? Number(resourceFilter) : resources[0]?.id;
+      if (!resId) return '—';
+      const usd = hoursToUsd(hours, resId);
+      return usd > 0 ? `$${usd.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}` : '—';
     }
   };
 
@@ -146,11 +158,13 @@ export default function AllocationPage() {
     <div className="p-6 space-y-6">
       {/* Page Header */}
       <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold text-gray-900">Allocations</h1>
-          <p className="text-sm mt-1 text-gray-500">
-            {displayUnit === 'HCM' ? 'Unit: HCM' : 'Unit: USD'} | {filteredAllocations.length} allocation{filteredAllocations.length !== 1 ? 's' : ''} found
-          </p>
+        <div className="flex items-center gap-4">
+          <span
+            className="text-sm font-medium"
+            style={{ color: '#78716c' }}
+          >
+            {displayUnit === 'HCM' ? 'Unit: HCM' : 'Unit: USD'} | {filteredAllocations.length} allocation{filteredAllocations.length !== 1 ? 's' : ''}
+          </span>
         </div>
         <div className="flex items-center gap-4">
           <div className="flex rounded-lg overflow-hidden border border-gray-300">
@@ -316,11 +330,11 @@ export default function AllocationPage() {
                         <td className="px-4 py-2 text-sm text-gray-900">Total</td>
                         {allHcms.map(hcm => (
                           <td key={hcm} className="px-3 py-2 text-center text-sm text-gray-900">
-                            {columnTotals[hcm] > 0 ? formatHcm(columnTotals[hcm]) : '—'}
+                            {columnTotals[hcm] > 0 ? formatTotal(columnTotals[hcm]) : '—'}
                           </td>
                         ))}
                         <td className="px-4 py-2 text-right text-sm text-gray-900">
-                          {formatHcm(Object.values(columnTotals).reduce((s, v) => s + v, 0))}
+                          {formatTotal(Object.values(columnTotals).reduce((s, v) => s + v, 0))}
                         </td>
                       </tr>
                     </tbody>
@@ -391,11 +405,11 @@ export default function AllocationPage() {
                         <td className="px-4 py-2 text-sm text-gray-900">Total</td>
                         {allHcms.map(hcm => (
                           <td key={hcm} className="px-3 py-2 text-center text-sm text-gray-900">
-                            {columnTotals[hcm] > 0 ? formatHcm(columnTotals[hcm]) : '—'}
+                            {columnTotals[hcm] > 0 ? formatTotal(columnTotals[hcm]) : '—'}
                           </td>
                         ))}
                         <td className="px-4 py-2 text-right text-sm text-gray-900">
-                          {formatHcm(Object.values(columnTotals).reduce((s, v) => s + v, 0))}
+                          {formatTotal(Object.values(columnTotals).reduce((s, v) => s + v, 0))}
                         </td>
                       </tr>
                     </tbody>

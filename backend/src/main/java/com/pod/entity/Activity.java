@@ -3,11 +3,39 @@ package com.pod.entity;
 import jakarta.persistence.*;
 import lombok.*;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.annotation.JsonProperty;
 
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
 
+/**
+ * Activity Entity - Work package within a project.
+ *
+ * PURPOSE:
+ * Represents a task/work package that can be allocated to resources.
+ * Activities are part of a project and can have dependencies on other activities.
+ *
+ * FIELDS:
+ * - projectId: Reference to parent project (required)
+ * - name: Activity name (required, max 200 chars)
+ * - description: Detailed description (optional, max 1000 chars)
+ * - plannedStartDate: Planned start date
+ * - plannedEndDate: Planned end date
+ * - estimatedHours: Estimated effort in hours
+ * - isMilestone: Whether this activity is a milestone
+ * - milestoneStatus: Status for milestones (NOT_STARTED, COMPLETED)
+ * - sequence: Ordering within project
+ *
+ * RELATIONSHIPS:
+ * - ManyToOne with Project (via projectId)
+ * - OneToMany with ActivityDependency (as predecessor or successor)
+ * - OneToMany with Allocations (resources assigned to this activity)
+ *
+ * GANTCHARTS:
+ * - Used by GanttService to generate timeline visualizations
+ * - Dependencies create the network diagram for scheduling
+ */
 @Entity
 @Table(name = "activities")
 @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
@@ -49,6 +77,7 @@ public class Activity {
 
     @Column(name = "is_milestone", nullable = false)
     @Builder.Default
+    @JsonProperty("isMilestone")
     private boolean isMilestone = false;
 
     @Column(name = "milestone_status", length = 20)

@@ -17,6 +17,36 @@ import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Optional;
 
+/**
+ * ProjectService - Business logic for Project entity lifecycle.
+ *
+ * PROCESS FLOW:
+ * 1. Query Operations (read-only):
+ *    - findById() - Get single project
+ *    - findAllWithFilters() - Paginated search with filtering
+ *    - findByRequestId() - Find by external request ID
+ *
+ * 2. Write Operations:
+ *    - create() - Create new project, defaults status to REQUESTED
+ *    - update() - Update project details
+ *    - updateStatus() - Change project status with validation
+ *    - updateBudget() - Update budget with monthly breakdown
+ *    - deactivate() - Soft delete (set isActive=false)
+ *    - reactivate() - Reactivate within 30 days of deactivation
+ *
+ * CONSTRAINTS:
+ * - Cannot change status from terminal states (COMPLETED, CANCELLED)
+ * - Cannot delete project with active allocations
+ * - Budget updates validate monthly breakdown JSON format
+ * - Reactivate only allowed within 30 days of deactivation
+ *
+ * STATE TRANSITIONS:
+ * - REQUESTED -> EXECUTING, CANCELLED
+ * - EXECUTING -> ON_HOLD, COMPLETED, CANCELLED
+ * - ON_HOLD -> EXECUTING, CANCELLED
+ * - COMPLETED -> (none - terminal)
+ * - CANCELLED -> (none - terminal)
+ */
 @Service
 @Transactional
 public class ProjectService {

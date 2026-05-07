@@ -6,6 +6,21 @@ interface GanttChartProps {
   onActivityClick?: (activityId: number) => void;
 }
 
+// Helper to get the Monday of a week
+function getWeekStart(date: Date): Date {
+  const d = new Date(date);
+  const day = d.getDay();
+  const diff = d.getDate() - day + (day === 0 ? -6 : 1); // Adjust to Monday
+  return new Date(d.setDate(diff));
+}
+
+// Helper to get week number from start date
+function getWeekDiff(date: Date, startDate: Date): number {
+  const weekStart = getWeekStart(date);
+  const startWeekStart = getWeekStart(startDate);
+  return Math.floor((weekStart.getTime() - startWeekStart.getTime()) / (7 * 24 * 60 * 60 * 1000));
+}
+
 export function GanttChart({ projectId, onActivityClick }: GanttChartProps) {
   const [ganttData, setGanttData] = useState<GanttData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -35,13 +50,15 @@ export function GanttChart({ projectId, onActivityClick }: GanttChartProps) {
       .finally(() => setLoading(false));
   }, [projectId]);
 
-  const dayWidth = Math.max(32, Math.min(48, dimensions.width / 40));
+  // Week-based dimensions
+  const weekWidth = Math.max(40, Math.min(60, dimensions.width / 30));
   const rowHeight = 44;
-  const headerHeight = 50;
+  const headerHeight = 60;
 
-  const dateRangeInfo = useMemo(() => {
+  // Generate week range instead of day range
+  const weekRangeInfo = useMemo(() => {
     if (!ganttData?.activities?.length) {
-      return { dateRange: [], startDate: null as Date | null, endDate: null as Date | null };
+      return { weeks: [], startDate: null as Date | null, endDate: null as Date | null };
     }
 
     const dates = ganttData.activities.flatMap(a => [
@@ -49,39 +66,66 @@ export function GanttChart({ projectId, onActivityClick }: GanttChartProps) {
       a.endDate ? new Date(a.endDate) : null
     ].filter(Boolean) as Date[]);
 
-    if (dates.length === 0) return { dateRange: [], startDate: null, endDate: null };
+    if (dates.length === 0) return { weeks: [], startDate: null, endDate: null };
 
     const min = new Date(Math.min(...dates.map(d => d.getTime())));
     const max = new Date(Math.max(...dates.map(d => d.getTime())));
-    min.setDate(min.getDate() - 2);
-    max.setDate(max.getDate() + 5);
 
-    const range: Date[] = [];
-    const curr = new Date(min);
-    while (curr <= max) {
-      range.push(new Date(curr));
-      curr.setDate(curr.getDate() + 1);
+    // Get to Monday of the week
+    const weekMin = getWeekStart(min);
+    weekMin.setDate(weekMin.getDate() - 1); // Show previous week
+    const weekMax = getWeekStart(max);
+    weekMax.setDate(weekMax.getDate() + 5); // Show a few more weeks
+
+    const weeks: Date[] = [];
+    const curr = new Date(weekMin);
+    while (curr <= weekMax) {
+      weeks.push(new Date(curr));
+      curr.setDate(curr.getDate() + 7);
     }
 
-    return { dateRange: range, startDate: min, endDate: max };
+    return { weeks, startDate: weekMin, endDate: weekMax };
   }, [ganttData]);
 
-  const { dateRange, startDate } = dateRangeInfo;
-
-  const formatDate = (date: Date) => {
-    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-  };
+  const { weeks, startDate } = weekRangeInfo;
 
   const getPosition = (date: Date) => {
     if (!startDate) return 0;
-    return Math.floor((date.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24)) * dayWidth;
+    return getWeekDiff(date, startDate) * weekWidth;
   };
 
+  // Determine which weeks should show a month label (first week of each month)
+  const getWeeksWithMonth = useMemo(() => {
+    const result: { date: Date; label: string; weekNum: number }[] = [];
+    let lastMonth = -1;
+    let weekNum = 1;
+    weeks.forEach((weekStart) => {
+      const month = weekStart.getMonth();
+      if (month !== lastMonth) {
+        const label = weekStart.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+        result.push({ date: weekStart, label, weekNum });
+        lastMonth = month;
+        weekNum = 1;
+      } else {
+        weekNum++;
+      }
+    });
+    return result;
+  }, [weeks]);
+
   const getBarWidth = (startDateStr?: string, endDateStr?: string) => {
-    if (!startDateStr || !endDateStr) return dayWidth * 3;
+    if (!startDateStr || !endDateStr) return weekWidth * 2;
     const start = new Date(startDateStr);
     const end = new Date(endDateStr);
-    return Math.max(dayWidth, Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24) + 1) * dayWidth);
+    const weeks = Math.ceil((end.getTime() - start.getTime()) / (7 * 24 * 60 * 60 * 1000)) + 1;
+    return Math.max(weekWidth, weeks * weekWidth);
+  };
+
+  const getDurationWeeks = (startDateStr?: string, endDateStr?: string) => {
+    if (!startDateStr || !endDateStr) return 0;
+    const start = new Date(startDateStr);
+    const end = new Date(endDateStr);
+    return Math.ceil((end.getTime() - start.getTime()) / (7 * 24 * 60 * 60 * 1000)) + 1;
   };
 
   if (loading) {
@@ -112,7 +156,7 @@ export function GanttChart({ projectId, onActivityClick }: GanttChartProps) {
     );
   }
 
-  const chartWidth = dateRange.length * dayWidth + 200;
+  const chartWidth = weeks.length * weekWidth + 200;
 
   return (
     <div className="overflow-x-auto rounded-lg border" style={{ borderColor: '#e5e5e5', backgroundColor: '#ffffff' }}>
@@ -121,18 +165,28 @@ export function GanttChart({ projectId, onActivityClick }: GanttChartProps) {
         <div className="flex items-center px-4 shrink-0" style={{ width: 200, borderRight: '1px solid #e5e5e5' }}>
           <span className="text-xs font-semibold uppercase tracking-wide" style={{ color: '#525252' }}>Activity</span>
         </div>
-        <div className="flex" style={{ width: chartWidth }}>
-          {dateRange.filter((_, i) => i % 7 === 0).map((date, i) => (
+        <div className="flex relative" style={{ width: chartWidth }}>
+          {/* Month labels and week numbers */}
+          {getWeeksWithMonth.map(({ date, label, weekNum }) => (
             <div
-              key={i}
-              className="absolute text-xs font-mono"
+              key={label + weekNum}
+              className="absolute text-xs"
               style={{
                 left: getPosition(date) + 200,
-                color: '#737373'
+                color: '#171717'
               }}
             >
-              {formatDate(date)}
+              <div className="font-semibold">{label}</div>
+              <div className="text-gray-400 mt-1">W{weekNum}</div>
             </div>
+          ))}
+          {/* Week tick marks */}
+          {weeks.map((weekStart) => (
+            <div
+              key={weekStart.toISOString()}
+              className="absolute top-8 bottom-0 w-px bg-gray-200"
+              style={{ left: getPosition(weekStart) + 200 }}
+            />
           ))}
         </div>
       </div>
@@ -181,19 +235,19 @@ export function GanttChart({ projectId, onActivityClick }: GanttChartProps) {
                     <span className="text-xs font-semibold truncate" style={{
                       color: activity.isCritical ? '#b91c1c' : activity.isMilestone ? '#7e22ce' : '#065f46'
                     }}>
-                      {activity.durationDays}d
+                      {getDurationWeeks(activity.startDate, activity.endDate)}w
                     </span>
                   </div>
                 )}
 
-                {/* Early/Late bars (subtle) */}
+                {/* Early/Late bars (subtle) - convert days to weeks */}
                 {activity.earlyStart !== activity.lateStart && (
                   <>
                     <div
                       className="absolute top-3 opacity-30 rounded"
                       style={{
-                        left: 200 + activity.earlyStart * dayWidth,
-                        width: (activity.earlyFinish - activity.earlyStart) * dayWidth,
+                        left: 200 + Math.floor(activity.earlyStart / 7) * weekWidth,
+                        width: Math.max(weekWidth, Math.floor((activity.earlyFinish - activity.earlyStart) / 7) * weekWidth),
                         height: 4,
                         backgroundColor: '#22c55e'
                       }}
@@ -201,8 +255,8 @@ export function GanttChart({ projectId, onActivityClick }: GanttChartProps) {
                     <div
                       className="absolute top-3 opacity-20 rounded"
                       style={{
-                        left: 200 + activity.lateStart * dayWidth,
-                        width: (activity.lateFinish - activity.lateStart) * dayWidth,
+                        left: 200 + Math.floor(activity.lateStart / 7) * weekWidth,
+                        width: Math.max(weekWidth, Math.floor((activity.lateFinish - activity.lateStart) / 7) * weekWidth),
                         height: 4,
                         backgroundColor: '#ef4444'
                       }}
@@ -252,7 +306,7 @@ export function GanttChart({ projectId, onActivityClick }: GanttChartProps) {
           <span className="text-xs font-medium" style={{ color: '#525252' }}>Critical Path</span>
         </div>
         <div className="ml-auto text-xs font-medium" style={{ color: '#737373' }}>
-          Total: {ganttData.totalDurationDays} days
+          Total: {Math.ceil(ganttData.totalDurationDays / 7)} weeks
         </div>
       </div>
     </div>

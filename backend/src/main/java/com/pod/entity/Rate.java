@@ -6,17 +6,29 @@ import java.math.BigDecimal;
 import java.time.Instant;
 
 /**
- * Rate — records the monthly cost per HCM (k USD) for a given cost center
- * and billable team code.
+ * Rate Entity - Monthly cost rates for cost center + billable team combinations.
  *
- * Column semantics (TDD §4.2):
- *  - monthly_rate_K: cost in thousand USD per full-time HCM (monthly)
- *  - effective_from: first month rate applies (YYYYMM string, e.g. "202601")
- *  - effective_to: last month rate applies before replacement; null = still active
+ * PURPOSE:
+ * Stores billing rates (monthly cost in K USD) for resource allocation cost calculation.
+ * Each rate applies to a specific cost center and billable team for a time period.
  *
- * Uniqueness: partial unique index on (cost_center_id, billable_team_code, effective_from)
- * guarantees only one rate entry covers a given month. RateService.closeActiveRate()
- * sets effective_to on previous record to enforce contiguous periods.
+ * FIELDS:
+ * - costCenterId: Cost center code (e.g., "HT366")
+ * - billableTeamCode: Billable team code (e.g., "ITDDEVPEM18")
+ * - monthlyRateK: Monthly rate in thousands of USD (e.g., 5.5 = $5,500/month)
+ * - effectiveFrom: Start month in YYYYMM format (e.g., "202601" = Jan 2026)
+ * - effectiveTo: End month in YYYYMM format (null = currently active)
+ * - isBillable: Whether this rate is billable
+ *
+ * CONSTRAINTS:
+ * - Unique constraint on (cost_center_id, billable_team_code, effective_from)
+ * - No overlapping periods for same cost center + team combination
+ * - Periods must be contiguous (RateService validates this)
+ *
+ * UNIQUE INDEX:
+ * Partial unique index guarantees only one rate entry covers a given month.
+ * RateService.closeActiveRate() sets effective_to on previous record to enforce
+ * contiguous periods (no gaps between rate periods).
  */
 @Entity
 @Table(name = "rates",

@@ -26,6 +26,7 @@ public class GanttResponse {
         private int lateStart;
         private int lateFinish;
         private boolean isCritical;
+        private boolean isMilestone;
     }
 
     @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder

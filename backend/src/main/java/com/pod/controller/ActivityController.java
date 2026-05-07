@@ -8,6 +8,23 @@ import org.springframework.web.bind.annotation.*;
 import java.util.List;
 import java.util.Map;
 
+/**
+ * ActivityController - REST API for Activity management within projects.
+ *
+ * BASE PATH: /api/v1/projects/{projectId}/activities
+ *
+ * ENDPOINTS:
+ * - GET /api/v1/projects/{projectId}/activities - List all activities for a project
+ * - GET /api/v1/projects/{projectId}/activities/{id} - Get single activity
+ * - POST /api/v1/projects/{projectId}/activities - Create new activity
+ * - PUT /api/v1/projects/{projectId}/activities/{id} - Update activity
+ * - DELETE /api/v1/projects/{projectId}/activities/{id} - Delete activity
+ * - POST /api/v1/projects/{projectId}/activities/{id}/dependencies - Add dependency
+ *
+ * ERRORS:
+ * - CycleDetectedException: 400 Bad Request (circular dependency)
+ * - EntityNotFoundException: 404 Not Found
+ */
 @RestController
 @RequestMapping("/api/v1/projects/{projectId}/activities")
 public class ActivityController {

@@ -2,17 +2,23 @@ import { test, expect } from '@playwright/test';
 
 test.describe('Project Detail Edit', () => {
   test('edit and save project via UI', async ({ page }) => {
-    // Go to project detail page
-    await page.goto('http://localhost:5173/projects/49');
+    // Go to project detail page (using project ID 1 which exists)
+    await page.goto('http://localhost:5173/projects/1');
 
     // Wait for page to load
     await page.waitForLoadState('networkidle');
 
-    // Check project name is displayed (use the second h1 which is the project name)
+    // Click on Project Summary tab to reveal Edit button
+    await page.getByRole('button', { name: /Project Summary/i }).click();
+
+    // Wait a bit for tab to render
+    await page.waitForTimeout(500);
+
+    // Check project name is displayed
     const projectName = await page.locator('h1').nth(1).textContent();
     console.log('Initial project name:', projectName);
 
-    // Click Edit button (first one - the main project edit button)
+    // Click Edit button
     const editButton = page.getByRole('button', { name: /Edit/i }).first();
     await editButton.click();
 
@@ -35,7 +41,7 @@ test.describe('Project Detail Edit', () => {
     console.log('Updated project name:', updatedName);
 
     // Verify via API
-    const response = await fetch('http://localhost:8080/api/v1/projects/49');
+    const response = await fetch('http://localhost:8080/api/v1/projects/1');
     const project = await response.json();
     console.log('API project name:', project.name);
 

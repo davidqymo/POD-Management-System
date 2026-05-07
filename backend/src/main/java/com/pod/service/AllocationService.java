@@ -19,26 +19,54 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.Instant;
-import java.time.LocalDate;
 import java.time.YearMonth;
+import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Objects;
 
 /**
- * AllocationService — core allocation lifecycle with five-constraint validation
- * and four-eyes approval workflow.
+ * AllocationService - Core allocation lifecycle with HCM-based validation and four-eyes approval.
  *
- * Constraints (validated by AllocationConstraintValidator):
- *   1. Daily avg ≤ 10h
- *   2. Monthly total ≤ 144h
- *   3. Monthly OT ≤ 36h
- *   4. Project spread ≤ 5 distinct projects
- *   5. Budget remaining ≥ proposed cost
+ * PROCESS FLOW:
  *
- * Workflow:
- *   createAllocation() → validate constraints → check overlap → insert PENDING
- *   approveAllocation() → PESSIMISTIC_WRITE → four-eyes check → APPROVED
- *   rejectAllocation() → PESSIMISTIC_WRITE → REJECTED + reason
+ * 1. CREATE ALLOCATION (createAllocation):
+ *    a. Validate inputs (resourceId, projectId, hcm, hours required)
+ *    b. Verify resource and project exist
+ *    c. Fetch activity if provided
+ *    d. Run HCM-based constraint validation (via AllocationConstraintValidator):
+ *       - Monthly total hours ≤ 144h (1 HCM = 144 hours)
+ *       - Budget remaining ≥ proposed cost
+ *    e. Check for overlapping allocations (same resource+project+hcm with PENDING/APPROVED)
+ *    f. Create allocation with PENDING status
+ *
+ * 2. APPROVE ALLOCATION (approveAllocation):
+ *    a. Acquire PESSIMISTIC_WRITE lock on allocation row
+ *    b. Four-eyes check: approverId cannot equal allocated resource's ID
+ *    c. Verify allocation is in PENDING status
+ *    d. Set status to APPROVED, record approvedBy and approvedAt timestamp
+ *    e. Append approval reason to notes if provided
+ *
+ * 3. REJECT ALLOCATION (rejectAllocation):
+ *    a. Acquire PESSIMISTIC_WRITE lock
+ *    b. Validate rejection reason (minimum 10 characters)
+ *    c. Set status to REJECTED, record rejection reason
+ *    d. Clear approvedBy/approvedAt fields
+ *
+ * CONSTRAINTS VALIDATED:
+ * - Monthly total ≤ 144 hours per resource (HCM cap)
+ * - Budget remaining ≥ proposed allocation cost
+ * - No overlapping allocations for same resource+project+hcm
+ *
+ * CONCURRENCY CONTROL:
+ * - PESSIMISTIC_WRITE lock for approve/reject operations
+ * - Optimistic locking via @Version field
+ * - Four-eyes policy prevents self-approval
+ *
+ * ERROR HANDLING:
+ * - ConstraintViolationException: HCM or budget constraints violated
+ * - FourEyesViolationException: Self-approval attempt
+ * - ResourceNotFoundException: Resource/Project/Activity not found
+ * - IllegalStateException: Invalid status transition or overlap detected
  */
 @Service
 @RequiredArgsConstructor
@@ -51,31 +79,31 @@ public class AllocationService {
     private final ActivityRepository activityRepository;
 
     /**
-     * Create a new allocation with validation and overlap detection.
+     * Create a new allocation with HCM-based validation.
      *
      * @param resourceId   resource being allocated
      * @param projectId    project receiving the allocation
      * @param activityId   nullable activity within project
-     * @param weekStart    Monday of the week being allocated
-     * @param hours        total hours for the week
-     * @param notes        optional notes
+     * @param hcm         HCM in YYYYMM format (e.g., 202512 = Dec 2025)
+     * @param hours       total hours for the HCM (max 144h)
+     * @param notes       optional notes
      * @return created Allocation in PENDING status
-     * @throws ConstraintViolationException if any of the 5 constraints violated
-     * @throws IllegalStateException        if overlap detected (another PENDING/APPROVED allocation same resource+week)
+     * @throws ConstraintViolationException if constraints violated
+     * @throws IllegalStateException    if overlap detected
      */
     @Transactional
     public Allocation createAllocation(
         Long resourceId,
         Long projectId,
         Long activityId,
-        LocalDate weekStart,
+        Integer hcm,
         BigDecimal hours,
         String notes
     ) {
         // Validate inputs
         Objects.requireNonNull(resourceId, "resourceId required");
         Objects.requireNonNull(projectId, "projectId required");
-        Objects.requireNonNull(weekStart, "weekStart required");
+        Objects.requireNonNull(hcm, "hcm required");
         Objects.requireNonNull(hours, "hours required");
 
         if (hours.compareTo(BigDecimal.ZERO) <= 0) {
@@ -95,34 +123,31 @@ public class AllocationService {
                 .orElseThrow(() -> new ResourceNotFoundException("Activity not found: " + activityId));
         }
 
-        // Derive month for constraint checks
-        YearMonth month = YearMonth.from(weekStart);
-
-        // 1. Run 5-constraint validation
-        List<ConstraintViolation> violations = validator.validate(
-            resourceId, projectId, month, hours, activityId
+        // 1. Run HCM-based constraint validation
+        List<ConstraintViolation> violations = validator.validateHcm(
+            resourceId, projectId, hcm, hours, activityId
         );
         if (!violations.isEmpty()) {
             throw new ConstraintViolationException("Allocation constraints violated", violations);
         }
 
-        // 2. Overlap detection (same resource + week with PENDING or APPROVED status)
-        List<Allocation> overlaps = allocationRepository.findOverlapping(resourceId, weekStart);
+        // 2. Overlap detection (same resource + project + hcm with PENDING or APPROVED status)
+        List<Allocation> overlaps = allocationRepository.findOverlappingByHcm(resourceId, projectId, hcm);
         if (!overlaps.isEmpty()) {
             throw new IllegalStateException(
-                String.format("Overlapping allocation exists for resource %d week starting %s",
-                    resourceId, weekStart)
+                String.format("Overlapping allocation exists for resource %d project %d hcm %d",
+                    resourceId, projectId, hcm)
             );
         }
 
-        // 3. Create allocation
+        // 3. Create allocation - auto-approved (no approval needed)
         Allocation allocation = Allocation.builder()
             .resource(resource)
             .project(project)
             .activity(activity)
-            .weekStartDate(weekStart)
+            .hcm(hcm)
             .hours(hours)
-            .status(AllocationStatus.PENDING)
+            .status(AllocationStatus.APPROVED)
             .notes(notes)
             .isActive(true)
             .build();
@@ -132,14 +157,6 @@ public class AllocationService {
 
     /**
      * Approve an allocation with four-eyes check (approver != resource owner).
-     *
-     * @param allocationId ID of allocation to approve
-     * @param approverId   ID of user performing approval
-     * @param reason       optional reason/notes for approval
-     * @return approved Allocation
-     * @throws ResourceNotFoundException    if allocation not found
-     * @throws FourEyesViolationException     if approver == resource (self-approval)
-     * @throws IllegalStateException          if allocation not in PENDING status
      */
     @Transactional
     public Allocation approveAllocation(Long allocationId, Long approverId, String reason) {
@@ -151,7 +168,6 @@ public class AllocationService {
             .orElseThrow(() -> new ResourceNotFoundException("Allocation not found: " + allocationId));
 
         // Four-eyes check: approver cannot be the resource being allocated
-        // Get the resource that is allocated, then check if that resource has an associated user who is the approver
         Resource allocatedResource = allocation.getResource();
         if (allocatedResource != null && approverId.equals(allocatedResource.getId())) {
             throw new FourEyesViolationException(
@@ -179,15 +195,6 @@ public class AllocationService {
 
     /**
      * Reject an allocation.
-     *
-     * @param allocationId ID of allocation to reject
-     * @param approverId   ID of user performing rejection (must not be resource)
-     * @param reason       required reason for rejection (min 10 chars)
-     * @return rejected Allocation
-     * @throws ResourceNotFoundException    if allocation not found
-     * @throws FourEyesViolationException     if approver == resource
-     * @throws IllegalArgumentException       if reason too short
-     * @throws IllegalStateException          if allocation not in PENDING status
      */
     @Transactional
     public Allocation rejectAllocation(Long allocationId, Long approverId, String reason) {
@@ -218,7 +225,7 @@ public class AllocationService {
 
         allocation.setStatus(AllocationStatus.REJECTED);
         allocation.setRejectionReason(reason);
-        allocation.setApprovedBy(approverId);  // record who rejected
+        allocation.setApprovedBy(approverId);
         allocation.setApprovedAt(Instant.now());
 
         return allocationRepository.save(allocation);
@@ -262,7 +269,7 @@ public class AllocationService {
     }
 
     /**
-     * Update an allocation - currently supports assigning to an activity.
+     * Update an allocation - assigns activity and auto-approves.
      */
     @Transactional
     public Allocation updateAllocation(Long allocationId, Long activityId) {
@@ -279,6 +286,64 @@ public class AllocationService {
             allocation.setActivity(activity);
         }
 
+        // Auto-approve allocation when assigning to activity (no approval needed)
+        if (allocation.getStatus() == AllocationStatus.PENDING) {
+            allocation.setStatus(AllocationStatus.APPROVED);
+        }
+
         return allocationRepository.save(allocation);
+    }
+
+    /**
+     * Update allocation hours.
+     */
+    @Transactional
+    public Allocation updateAllocationHours(Long allocationId, BigDecimal hours) {
+        Allocation allocation = allocationRepository.findById(allocationId)
+            .orElseThrow(() -> new ResourceNotFoundException("Allocation not found: " + allocationId));
+
+        // Validate: cannot edit past months
+        Integer nowHcm = getCurrentHcm();
+        if (allocation.getHcm() < nowHcm) {
+            throw new IllegalArgumentException("Cannot edit allocation for past months");
+        }
+
+        allocation.setHours(hours);
+        return allocationRepository.save(allocation);
+    }
+
+    /**
+     * Delete an allocation.
+     */
+    @Transactional
+    public void deleteAllocation(Long allocationId) {
+        Allocation allocation = allocationRepository.findById(allocationId)
+            .orElseThrow(() -> new ResourceNotFoundException("Allocation not found: " + allocationId));
+
+        // Validate: cannot delete past months
+        Integer nowHcm = getCurrentHcm();
+        if (allocation.getHcm() < nowHcm) {
+            throw new IllegalArgumentException("Cannot delete allocation for past months");
+        }
+
+        allocationRepository.delete(allocation);
+    }
+
+    /**
+     * Get current HCM (YYYYMM format).
+     */
+    private Integer getCurrentHcm() {
+        YearMonth now = YearMonth.now();
+        return now.getYear() * 100 + now.getMonthValue();
+    }
+
+    /**
+     * Parse HCM (YYYYMM) to YearMonth.
+     */
+    private YearMonth parseHcmToYearMonth(Integer hcm) {
+        String hcmStr = hcm.toString();
+        int year = Integer.parseInt(hcmStr.substring(0, 4));
+        int month = Integer.parseInt(hcmStr.substring(4, 6));
+        return YearMonth.of(year, month);
     }
 }

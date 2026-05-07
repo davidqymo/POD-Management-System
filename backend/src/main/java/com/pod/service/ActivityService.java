@@ -11,6 +11,30 @@ import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 
+/**
+ * ActivityService - Business logic for Activity and ActivityDependency management.
+ *
+ * PROCESS FLOW:
+ * 1. CRUD Operations:
+ *    - createActivity(): Create new activity within a project
+ *    - updateActivity(): Update activity details
+ *    - deleteActivity(): Soft delete (cascade deletes dependencies)
+ *    - getActivitiesByProject(): Get all activities for a project
+ *
+ * 2. Dependency Management:
+ *    - addDependency(): Link predecessor -> successor (Finish-to-Start)
+ *    - removeDependency(): Remove dependency link
+ *    - validateNoCycle(): Ensure no circular dependencies
+ *
+ * 3. Timeline Calculations:
+ *    - calculateEarlyStart/Finish: Forward pass
+ *    - calculateLateStart/Finish: Backward pass
+ *    - determineCriticalPath: Activities with zero float
+ *
+ * VALIDATION:
+ * - CycleDetectedException: Thrown when dependency creates circular reference
+ * - Cannot delete activity with existing allocations
+ */
 @Service
 @Transactional
 public class ActivityService {

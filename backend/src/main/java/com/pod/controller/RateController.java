@@ -12,15 +12,24 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * RateController — REST API for Rate CRUD operations.
+ * RateController - REST API endpoints for Rate management.
  *
- * T1.5: Endpoints:
- *   - GET /api/v1/rates — list all rates
- *   - GET /api/v1/rates/active — get active rate for cost center + team
- *   - POST /api/v1/rates — create new rate with contiguity validation
- *   - GET /api/v1/rates/{id} — get by ID
+ * ENDPOINTS:
+ * - GET /api/v1/rates - List all rates with pagination
+ * - GET /api/v1/rates/{id} - Get single rate by ID
+ * - POST /api/v1/rates - Create new rate (validates no gaps in periods)
+ * - PUT /api/v1/rates/{id} - Update rate
+ * - DELETE /api/v1/rates/{id} - Soft delete rate
+ *
+ * QUERY PARAMS:
+ * - costCenterId: Filter by cost center
+ * - billableTeamCode: Filter by billable team
+ *
+ * ERRORS:
+ * - RatePeriodGapException: 409 Conflict when period gap detected
+ * - EntityNotFoundException: 404 Not Found
  */
-@RestController
+ @RestController
 @RequestMapping("/api/v1/rates")
 public class RateController {
 

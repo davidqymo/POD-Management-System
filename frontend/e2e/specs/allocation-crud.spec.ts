@@ -33,12 +33,12 @@ test.describe('Allocation CRUD', () => {
     expect(projectResponse.ok()).toBeTruthy();
     const project = await projectResponse.json();
 
-    // Now create an allocation
+    // Now create an allocation (hcm is YYYYMM format: 202516 = May 2025)
     const allocationResponse = await request.post(`${API_BASE}/allocations`, {
       data: {
         resourceId: resource.id,
         projectId: project.id,
-        weekStart: '2026-04-28',
+        hcm: 202516,
         hours: 40,
         notes: 'E2E test allocation'
       }
@@ -94,7 +94,7 @@ test.describe('Allocation CRUD', () => {
       data: {
         resourceId: resource.id,
         projectId: project.id,
-        weekStart: '2026-05-05',
+        hcm: 202519,
         hours: 20
       }
     });
@@ -144,7 +144,7 @@ test.describe('Allocation CRUD', () => {
       data: {
         resourceId: resource.id,
         projectId: project.id,
-        weekStart: '2026-05-12',
+        hcm: 202520,
         hours: 16
       }
     });
@@ -195,7 +195,7 @@ test.describe('Allocation CRUD', () => {
       data: {
         resourceId: resource.id,
         projectId: project.id,
-        weekStart: '2026-05-19',
+        hcm: 202521,
         hours: 32
       }
     });
@@ -244,17 +244,17 @@ test.describe('Allocation CRUD', () => {
       data: {
         resourceId: resource.id,
         projectId: project.id,
-        weekStart: '2026-05-26',
+        hcm: 202522,
         hours: 40
       }
     });
 
-    // Try to create overlapping allocation (same week)
+    // Try to create overlapping allocation (same HCM)
     const overlapResponse = await request.post(`${API_BASE}/allocations`, {
       data: {
         resourceId: resource.id,
         projectId: project.id,
-        weekStart: '2026-05-26', // Same week
+        hcm: 202522, // Same HCM
         hours: 20
       }
     });

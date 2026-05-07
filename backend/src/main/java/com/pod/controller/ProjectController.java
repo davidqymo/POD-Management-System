@@ -18,6 +18,45 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+/**
+ * ProjectController - REST API endpoints for Project operations.
+ *
+ * PROCESS FLOW:
+ * 1. GET /api/v1/projects - List projects with pagination and filters
+ *    - Query params: status, search, page, size
+ *    - Returns: Page<Project>
+ *
+ * 2. GET /api/v1/projects/{id} - Get single project by ID
+ *    - Returns: Project details
+ *
+ * 3. POST /api/v1/projects - Create new project
+ *    - Input: Project JSON
+ *    - Returns: Created Project (201 Created)
+ *
+ * 4. PUT /api/v1/projects/{id} - Update project
+ *    - Full update of project fields
+ *
+ * 5. PATCH /api/v1/projects/{id}/status - Change project status
+ *    - Input: { "status": "EXECUTING" }
+ *    - Validates state transitions
+ *
+ * 6. PATCH /api/v1/projects/{id}/budget - Update budget
+ *    - Input: { "budgetTotalK": 100.00, "budgetMonthlyBreakdown": "..." }
+ *
+ * 7. DELETE /api/v1/projects/{id} - Soft delete
+ *    - Sets isActive=false
+ *    - Fails if project has active allocations
+ *
+ * 8. POST /api/v1/projects/{id}/reactivate - Reactivate project
+ *    - Only allowed within 30 days of deactivation
+ *
+ * 9. GET /api/v1/projects/gantt - Get Gantt chart data
+ *    - Returns: GanttResponse with activities and dependencies
+ *
+ * ERROR HANDLING:
+ * - TerminalStateException -> 400 Bad Request (invalid state transition)
+ * - ResourceNotFoundException -> 404 Not Found
+ */
 @RestController
 @RequestMapping("/api/v1/projects")
 public class ProjectController {

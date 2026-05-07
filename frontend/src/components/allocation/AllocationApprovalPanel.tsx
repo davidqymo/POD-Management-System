@@ -25,11 +25,16 @@ export default function AllocationApprovalPanel({
 
   const pendingAllocations = allocations.filter((a) => a.status === 'PENDING');
 
-  const handleSelectId = (id: number) => {
+  // Selection handler - not currently used but kept for potential future feature
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const _unused_handleSelectId = (id: number) => {
     setSelectedIds((prev) =>
       prev.includes(id) ? prev.filter((i) => i !== id) : [...prev, id]
     );
   };
+
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  void _unused_handleSelectId;
 
   const handleBulkApprove = async () => {
     setProcessing(true);
@@ -144,8 +149,6 @@ export default function AllocationApprovalPanel({
         <AllocationList
           allocations={pendingAllocations}
           loading={loading}
-          selectedIds={selectedIds}
-          onSelectId={handleSelectId}
         />
       </div>
 

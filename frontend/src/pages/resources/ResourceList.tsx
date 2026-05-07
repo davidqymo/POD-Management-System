@@ -3,9 +3,13 @@ import { Link } from 'react-router-dom'
 import { FiSearch, FiPlus, FiDownload, FiX } from 'react-icons/fi'
 import DataTable from '../../components/common/DataTable'
 import ImportModal from '../../components/modals/ImportModal'
+import ResourceModal from '../../components/modals/ResourceModal'
 import { useResources } from '../../hooks/useResources'
+import { createResource as apiCreateResource } from '../../api/resources'
 import { exportToCSV } from '../../utils/export'
 import type { Resource, ResourceFilters } from '../../types'
+import { useQuery } from '@tanstack/react-query'
+import { listFiltersByCategory } from '../../api/admin'
 
 /* ─── Helpers ─────────────────────────────────────────── */
 
@@ -23,14 +27,9 @@ const statusMeta: Record<string, { bg: string; text: string; label: string; dot:
   TERMINATED: { bg: 'bg-gray-50', text: 'text-gray-500', label: 'Terminated', dot: 'bg-gray-400' },
 }
 
-// Dynamic filter options - populated from actual data
-const SKILL_OPTIONS = ['backend', 'frontend', 'general', 'qa', 'devops', 'design']
-const COST_CENTER_OPTIONS = [
-  'ENG-CC1', 'ENG-CC2', 'ENG-CC3', 'ENG-CC4',
-  'FIN-CC1', 'FIN-CC2', 'PM-CC1', 'PM-CC2',
-  'OPS-CC1', 'OPS-CC2', 'HR-CC1', 'HR-CC2',
-]
-const STATUS_OPTIONS = ['ACTIVE', 'ON_LEAVE', 'TERMINATED']
+// Default filter options (fallback if API not available)
+const DEFAULT_SKILL_OPTIONS = ['backend', 'frontend', 'general', 'qa', 'devops', 'design'];
+const DEFAULT_COST_CENTER_OPTIONS = ['ENG-CC1', 'ENG-CC2', 'ENG-CC3', 'ENG-CC4', 'FIN-CC1', 'FIN-CC2', 'PM-CC1', 'PM-CC2', 'OPS-CC1', 'OPS-CC2', 'HR-CC1', 'HR-CC2'];
 
 /* ─── Sub-components ──────────────────────────────────── */
 
@@ -65,16 +64,18 @@ function ActiveFilters(props: Readonly<{
   search: string
   skill: string
   costCenter: string
-  status: string
+  functionalManager: string
+  l5TeamCode: string
   onClear: () => void
   onRemove: (key: string) => void
 }>) {
-  const { search, skill, costCenter, status, onClear, onRemove } = props;
+  const { search, skill, costCenter, functionalManager, l5TeamCode, onClear, onRemove } = props;
   const filters = [
     search && { key: 's', label: `Search: "${search}"` },
     skill && { key: 'skill', label: skill },
     costCenter && { key: 'cc', label: costCenter },
-    status && { key: 'status', label: status },
+    functionalManager && { key: 'fm', label: functionalManager },
+    l5TeamCode && { key: 'l5', label: l5TeamCode },
   ].filter(Boolean) as { key: string; label: string }[]
 
   if (!filters.length) return null
@@ -105,10 +106,38 @@ export default function ResourceList() {
   const [search, setSearch] = useState('')
   const [skill, setSkill] = useState('')
   const [costCenter, setCostCenter] = useState('')
-  const [statusFilter, setStatusFilter] = useState('')
+  const [functionalManager, setFunctionalManager] = useState('')
+  const [l5TeamCode, setL5TeamCode] = useState('')
   const [showImport, setShowImport] = useState(false)
+  const [showAddModal, setShowAddModal] = useState(false)
   const [page, setPage] = useState(0)
   const [pageSize, setPageSize] = useState(20)
+
+  // Fetch filter options from admin API
+  const { data: skillFilters = [] } = useQuery({
+    queryKey: ['admin', 'filters', 'skill'],
+    queryFn: () => listFiltersByCategory('skill'),
+  });
+
+  const { data: costCenterFilters = [] } = useQuery({
+    queryKey: ['admin', 'filters', 'cost_center'],
+    queryFn: () => listFiltersByCategory('cost_center'),
+  });
+
+  const { data: l5TeamFilters = [] } = useQuery({
+    queryKey: ['admin', 'filters', 'l5_team'],
+    queryFn: () => listFiltersByCategory('l5_team'),
+  });
+
+  const { data: billableTeamFilters = [] } = useQuery({
+    queryKey: ['admin', 'filters', 'billable_team'],
+    queryFn: () => listFiltersByCategory('billable_team'),
+  });
+
+  const SKILL_OPTIONS = skillFilters.length > 0 ? skillFilters.map(f => f.value) : DEFAULT_SKILL_OPTIONS;
+  const COST_CENTER_OPTIONS = costCenterFilters.length > 0 ? costCenterFilters.map(f => f.value) : DEFAULT_COST_CENTER_OPTIONS;
+  const L5_TEAM_OPTIONS = l5TeamFilters.length > 0 ? l5TeamFilters.map(f => f.value) : [];
+  const BILLABLE_TEAM_OPTIONS = billableTeamFilters.length > 0 ? billableTeamFilters.map(f => f.value) : [];
 
   // Debounced search
   const [debouncedSearch, setDebouncedSearch] = useState(search)
@@ -123,15 +152,16 @@ export default function ResourceList() {
       search: debouncedSearch || undefined,
       skill: skill || undefined,
       costCenter: costCenter || undefined,
-      status: statusFilter || undefined,
+      functionalManager: functionalManager || undefined,
+      l5TeamCode: l5TeamCode || undefined,
       page,
       size: pageSize,
     }),
-    [debouncedSearch, skill, costCenter, statusFilter, page, pageSize],
+    [debouncedSearch, skill, costCenter, functionalManager, l5TeamCode, page, pageSize],
   )
 
   // TanStack Query — data fetched from backend via useResources hook
-  const { data: resourcesData, isLoading } = useResources(filters)
+  const { data: resourcesData, isLoading, refetch } = useResources(filters)
   const resources = resourcesData?.content || []
   const totalElements = resourcesData?.totalElements || 0
   const totalPages = resourcesData?.totalPages || 0
@@ -140,7 +170,8 @@ export default function ResourceList() {
     setSearch('')
     setSkill('')
     setCostCenter('')
-    setStatusFilter('')
+    setFunctionalManager('')
+    setL5TeamCode('')
     setPage(0)
   }, [])
 
@@ -149,7 +180,8 @@ export default function ResourceList() {
       if (key === 's') setSearch('')
       else if (key === 'skill') setSkill('')
       else if (key === 'cc') setCostCenter('')
-      else if (key === 'status') setStatusFilter('')
+      else if (key === 'fm') setFunctionalManager('')
+      else if (key === 'l5') setL5TeamCode('')
       setPage(0)
     },
     [],
@@ -210,13 +242,15 @@ export default function ResourceList() {
 
   return (
     <div className="space-y-5">
-      {/* Header */}
+      {/* Action Bar */}
       <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-bold tracking-tight text-gray-900">Resources</h1>
-          <p className="mt-0.5 text-sm text-gray-500">
-            {isLoading ? 'Loading...' : `${resources.length} ${resources.length === 1 ? 'resource' : 'resources'} in the system`}
-          </p>
+        <div className="flex items-center gap-4">
+          <span
+            className="text-sm font-medium"
+            style={{ color: '#78716c' }}
+          >
+            {isLoading ? 'Loading...' : `${totalElements} ${totalElements === 1 ? 'resource' : 'resources'}`}
+          </span>
         </div>
         <div className="flex items-center gap-2">
           <button
@@ -228,10 +262,10 @@ export default function ResourceList() {
           </button>
           <button
             className="inline-flex items-center gap-1.5 rounded-lg bg-primary-600 px-3.5 py-2 text-sm font-medium text-white transition-colors hover:bg-primary-700"
-            onClick={() => setShowImport(true)}
+            onClick={() => setShowAddModal(true)}
           >
             <FiPlus className="h-4 w-4" />
-            Import CSV
+            Add Resource
           </button>
         </div>
       </div>
@@ -275,15 +309,27 @@ export default function ResourceList() {
             ))}
           </select>
 
-          {/* Status */}
+          {/* Functional Manager */}
           <select
-            value={statusFilter}
-            onChange={(e) => { setStatusFilter(e.target.value); setPage(0); }}
+            value={functionalManager}
+            onChange={(e) => { setFunctionalManager(e.target.value); setPage(0); }}
             className="rounded-lg border border-gray-200 bg-white py-2 pl-3 pr-8 text-sm text-gray-700 outline-none transition-colors focus:border-primary-600 focus:ring-1 focus:ring-primary-600"
           >
-            <option value="">All Statuses</option>
-            {STATUS_OPTIONS.map(status => (
-              <option key={status} value={status}>{status}</option>
+            <option value="">All Managers</option>
+            {BILLABLE_TEAM_OPTIONS.map(fm => (
+              <option key={fm} value={fm}>{fm}</option>
+            ))}
+          </select>
+
+          {/* L5 Team */}
+          <select
+            value={l5TeamCode}
+            onChange={(e) => { setL5TeamCode(e.target.value); setPage(0); }}
+            className="rounded-lg border border-gray-200 bg-white py-2 pl-3 pr-8 text-sm text-gray-700 outline-none transition-colors focus:border-primary-600 focus:ring-1 focus:ring-primary-600"
+          >
+            <option value="">All L5 Teams</option>
+            {L5_TEAM_OPTIONS.map(l5 => (
+              <option key={l5} value={l5}>{l5}</option>
             ))}
           </select>
         </div>
@@ -293,7 +339,8 @@ export default function ResourceList() {
           search={search}
           skill={skill}
           costCenter={costCenter}
-          status={statusFilter}
+          functionalManager={functionalManager}
+          l5TeamCode={l5TeamCode}
           onClear={handleReset}
           onRemove={handleRemove}
         />
@@ -376,6 +423,16 @@ export default function ResourceList() {
         onClose={() => setShowImport(false)}
         onImport={(_resources) => {
           setShowImport(false)
+        }}
+      />
+
+      {/* Add Resource Modal */}
+      <ResourceModal
+        open={showAddModal}
+        onClose={() => setShowAddModal(false)}
+        onSave={async (resource) => {
+          await apiCreateResource(resource as any)
+          refetch()
         }}
       />
     </div>

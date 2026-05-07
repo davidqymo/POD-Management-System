@@ -123,7 +123,8 @@ public class GanttService {
                 .startDate(a.getPlannedStartDate()).endDate(a.getPlannedEndDate())
                 .estimatedHours(a.getEstimatedHours()).durationDays(getDurationDays(a))
                 .earlyStart(es).earlyFinish(earlyFinish.getOrDefault(id, 0))
-                .lateStart(ls).lateFinish(lateFinish.getOrDefault(id, 0)).isCritical(isCritical).build());
+                .lateStart(ls).lateFinish(lateFinish.getOrDefault(id, 0)).isCritical(isCritical)
+                .isMilestone(a.isMilestone()).build());
 
             if (isCritical) criticalPathIds.add(id);
         }

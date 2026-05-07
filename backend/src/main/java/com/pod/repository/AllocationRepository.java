@@ -13,7 +13,6 @@ import org.springframework.stereotype.Repository;
 import jakarta.persistence.LockModeType;
 
 import java.math.BigDecimal;
-import java.time.LocalDate;
 import java.time.YearMonth;
 import java.util.List;
 import java.util.Optional;
@@ -42,67 +41,48 @@ public interface AllocationRepository extends JpaRepository<Allocation, Long> {
     Optional<Allocation> findByIdWithLock(@Param("id") Long id);
 
     /**
-     * Find active (PENDING/APPROVED) allocations by resource in a given month.
-     * Used for overlap detection.
+     * Find active (PENDING/APPROVED) allocations by resource and HCM.
      */
     @Query("SELECT a FROM Allocation a " +
            "WHERE a.resource.id = :resourceId " +
-           "  AND a.weekStartDate BETWEEN :monthStart AND :monthEnd " +
+           "  AND a.hcm = :hcm " +
            "  AND a.status IN ('PENDING', 'APPROVED') " +
            "  AND a.isActive = true")
-    List<Allocation> findActiveByResourceAndMonth(
+    List<Allocation> findActiveByResourceAndHcm(
         @Param("resourceId") Long resourceId,
-        @Param("monthStart") LocalDate monthStart,
-        @Param("monthEnd") LocalDate monthEnd
+        @Param("hcm") Integer hcm
     );
 
     /**
-     * Sum of approved allocation hours for a resource in a given month.
-     * Excludes PENDING allocations from the approved-hour calculation.
+     * Sum of approved allocation hours for a resource in a given HCM.
      */
     @Query("SELECT COALESCE(SUM(a.hours), 0) FROM Allocation a " +
            "WHERE a.resource.id = :resourceId " +
-           "  AND a.weekStartDate BETWEEN :monthStart AND :monthEnd " +
+           "  AND a.hcm = :hcm " +
            "  AND a.status = 'APPROVED' " +
            "  AND a.isActive = true")
-    BigDecimal sumApprovedHoursForActiveResource(
+    BigDecimal sumApprovedHoursForResourceInMonth(
         @Param("resourceId") Long resourceId,
-        @Param("monthStart") LocalDate monthStart,
-        @Param("monthEnd") LocalDate monthEnd
+        @Param("hcm") Integer hcm
     );
 
     /**
-     * Count distinct active (APPROVED) projects a resource is allocated to in a given month,
-     * optionally excluding a specific project.
-     */
-    @Query("SELECT COUNT(DISTINCT a.project.id) FROM Allocation a " +
-           "WHERE a.resource.id = :resourceId " +
-           "  AND a.weekStartDate BETWEEN :monthStart AND :monthEnd " +
-           "  AND a.status = 'APPROVED' " +
-           "  AND a.isActive = true " +
-           "  AND (:excludeProjectId IS NULL OR a.project.id != :excludeProjectId)")
-    Long countDistinctActiveProjectsInMonth(
-        @Param("resourceId") Long resourceId,
-        @Param("monthStart") LocalDate monthStart,
-        @Param("monthEnd") LocalDate monthEnd,
-        @Param("excludeProjectId") Long excludeProjectId
-    );
-
-    /**
-     * Find overlapping approval-confirmed allocation (same resource, same week, PENDING/APPROVED).
+     * Find overlapping allocation by HCM (same resource + project + hcm, PENDING/APPROVED).
      */
     @Query("SELECT a FROM Allocation a " +
            "WHERE a.resource.id = :resourceId " +
-           "  AND a.weekStartDate = :weekStart " +
+           "  AND a.project.id = :projectId " +
+           "  AND a.hcm = :hcm " +
            "  AND a.status IN ('PENDING', 'APPROVED') " +
            "  AND a.isActive = true")
-    List<Allocation> findOverlapping(
+    List<Allocation> findOverlappingByHcm(
         @Param("resourceId") Long resourceId,
-        @Param("weekStart") LocalDate weekStart
+        @Param("projectId") Long projectId,
+        @Param("hcm") Integer hcm
     );
 
     /**
-     * Soft-close all active allocations for a project (CANCELLED/SUSPENDED transition).
+     * Soft-close all active allocations for a project.
      */
     @Modifying
     @Query("UPDATE Allocation a SET " +
@@ -116,7 +96,7 @@ public interface AllocationRepository extends JpaRepository<Allocation, Long> {
     int softCloseAllByProject(@Param("projectId") Long projectId, @Param("reason") String reason);
 
     /**
-     * Find approved allocations for a project (used by ProjectService to check terminal state before close).
+     * Find approved allocations for a project.
      */
     @Query("SELECT COUNT(a) FROM Allocation a " +
            "WHERE a.project.id = :projectId " +
@@ -144,8 +124,7 @@ public interface AllocationRepository extends JpaRepository<Allocation, Long> {
     );
 
     /**
-     * Get rate for a resource: aggregate total approved hours in a month
-     * Used by validator to compute actual budget remaining via project total - spent.
+     * Sum approved hours for a project.
      */
     @Query("SELECT SUM(a.hours) FROM Allocation a " +
            "WHERE a.project.id = :projectId " +

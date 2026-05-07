@@ -1,8 +1,12 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { FiArrowLeft, FiSave } from 'react-icons/fi'
-import { useMutation } from '@tanstack/react-query'
+import { useMutation, useQuery } from '@tanstack/react-query'
 import { projectsApi } from '../../api/projects'
+import { listFiltersByCategory } from '../../api/admin'
+
+// Default fallback options when API unavailable
+const DEFAULT_BILLABLE_TEAM_OPTIONS = ['ITDDEVPEM18', 'BTC-API', 'TC001', 'TC002'];
 
 const PROJECT_STATUS_OPTIONS = [
   { value: 'REQUESTED', label: 'Requested' },
@@ -14,6 +18,18 @@ const PROJECT_STATUS_OPTIONS = [
 
 export default function ProjectForm() {
   const navigate = useNavigate()
+
+  // Fetch filter options from admin API
+  const { data: billableTeamFilters = [] } = useQuery({
+    queryKey: ['admin', 'filters', 'billable_team'],
+    queryFn: () => listFiltersByCategory('billable_team'),
+  });
+
+  // Derive options - use API data or fallbacks
+  const BILLABLE_TEAM_OPTIONS = billableTeamFilters.length > 0
+    ? billableTeamFilters.map(f => f.value)
+    : DEFAULT_BILLABLE_TEAM_OPTIONS;
+
   const [formData, setFormData] = useState<{
     name: string
     requestId: string
@@ -129,14 +145,17 @@ export default function ProjectForm() {
         {/* Billable Product ID */}
         <div>
           <label className="block text-sm font-medium text-gray-700">Billable Product ID</label>
-          <input
-            type="text"
+          <select
             name="billableProductId"
             value={formData.billableProductId}
             onChange={handleChange}
             className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm outline-none focus:border-primary-600 focus:ring-1 focus:ring-primary-600"
-            placeholder="e.g., PROD-001"
-          />
+          >
+            <option value="">Select Billable Team</option>
+            {BILLABLE_TEAM_OPTIONS.map(team => (
+              <option key={team} value={team}>{team}</option>
+            ))}
+          </select>
         </div>
 
         {/* Budget */}

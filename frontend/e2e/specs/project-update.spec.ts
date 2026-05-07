@@ -3,8 +3,8 @@ import { test, expect } from '@playwright/test';
 const API_BASE = 'http://localhost:8080/api/v1';
 
 test.describe('Project Update', () => {
-  // Use an existing project ID
-  const testProjectId = 49;
+  // Use an existing project ID (1 exists from seed data)
+  const testProjectId = 1;
 
   test('update project via PATCH API', async ({ request }) => {
     // Update the project

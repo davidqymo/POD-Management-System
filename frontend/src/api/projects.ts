@@ -28,7 +28,8 @@ export interface Activity {
   plannedEndDate?: string;
   estimatedHours: number;
   actualHours?: number;
-  isMilestone: boolean;
+  isMilestone?: boolean;
+  milestone?: boolean;
   sequence: number;
 }
 
@@ -46,7 +47,8 @@ export interface GanttData {
     lateStart: number;
     lateFinish: number;
     isCritical: boolean;
-    isMilestone: boolean;
+    isMilestone?: boolean;
+    milestone?: boolean;
   }[];
   links: { from: number; to: number; type: string }[];
   criticalPath: number[];

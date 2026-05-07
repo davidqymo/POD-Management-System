@@ -32,4 +32,6 @@ public interface ProjectRepository extends JpaRepository<Project, Long> {
     @Modifying
     @Query(value = "UPDATE projects SET clarity_id = :clarityId, billable_product_id = :billableProductId, updated_at = NOW() WHERE id = :id", nativeQuery = true)
     void updateClarityAndProductIds(@Param("id") Long id, @Param("clarityId") String clarityId, @Param("billableProductId") String billableProductId);
+
+    Optional<Project> findByClarityId(String clarityId);
 }

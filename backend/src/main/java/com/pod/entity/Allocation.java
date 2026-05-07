@@ -2,17 +2,52 @@ package com.pod.entity;
 
 import jakarta.persistence.*;
 import lombok.*;
+import com.pod.entity.Project;
+import com.pod.entity.Resource;
+import com.pod.entity.Activity;
 import java.math.BigDecimal;
 import java.time.Instant;
-import java.time.LocalDate;
 
 /**
- * Allocation — weekly resource assignment to a project activity.
- * One active allocation per resource per week (PENDING or APPROVED).
+ * Allocation Entity - Monthly (HCM) resource assignment to a project/activity.
  *
- * The DB-level partial unique index on (resource_id, week_start_date)
- * where status IN ('PENDING','APPROVED') and is_active=true is defined in Flyway V1.
- * Uniqueness is enforced in AllocationService via PESSIMISTIC_WRITE lock + overlap query.
+ * PURPOSE:
+ * Represents the allocation of a team member to a project for a specific month (HCM).
+ * Used for capacity planning, budget tracking, and resource management.
+ *
+ * UNIQUE CONSTRAINT:
+ * One active allocation per (resource, project, hcm) with status PENDING or APPROVED.
+ * DB-level partial unique index on (resource_id, project_id, hcm) where is_active=true.
+ * Service-level enforcement via PESSIMISTIC_WRITE lock + overlap query.
+ *
+ * RELATIONSHIPS:
+ * - Resource: The team member being allocated (ManyToOne, required)
+ * - Project: The project they are allocated to (ManyToOne, required)
+ * - Activity: Optional specific activity within the project (ManyToOne, optional)
+ *
+ * FIELDS:
+ * - hcm: Headcount Month in YYYYMM format (e.g., 202601 = Jan 2026)
+ * - hours: Allocated hours for the month (max 999.99)
+ * - status: PENDING (awaiting approval), APPROVED, REJECTED, LOCKED
+ * - approvedBy: User ID who approved this allocation
+ * - approvedAt: Timestamp of approval
+ * - rejectionReason: Reason if REJECTED
+ * - notes: Free-form notes
+ *
+ * SOFT DELETE:
+ * - isActive flag for soft delete (cannot delete PENDING allocations)
+ * - PrePersist validates: isActive=false requires status != PENDING
+ *
+ * AUDIT:
+ * - createdAt: Set on first creation
+ * - updatedAt: Auto-updated on every save
+ * - version: Optimistic locking
+ *
+ * WORKFLOW:
+ * 1. Create allocation -> status=PENDING
+ * 2. Manager approves -> status=APPROVED, set approvedBy/approvedAt
+ * 3. Manager rejects -> status=REJECTED, set rejectionReason
+ * 4. Lock allocation -> status=LOCKED (for historical periods)
  */
 @Entity
 @Table(name = "allocations")
@@ -35,8 +70,12 @@ public class Allocation {
     @JoinColumn(name = "activity_id")
     private Activity activity;
 
-    @Column(name = "week_start_date", nullable = false)
-    private LocalDate weekStartDate;
+    /**
+     * HCM (Headcount Month) in YYYYMM format.
+     * e.g., 202512 = December 2025, 202601 = January 2026
+     */
+    @Column(name = "hcm", nullable = false)
+    private Integer hcm;
 
     @Column(name = "hours", nullable = false, precision = 5, scale = 2)
     @Builder.Default

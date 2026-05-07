@@ -35,4 +35,6 @@ public interface ResourceRepository extends JpaRepository<Resource, Long>, JpaSp
 
     @Query("SELECT r FROM Resource r WHERE r.skill IN :skills AND r.level BETWEEN :min AND :max AND r.isActive = true AND r.isBillable = true")
     Page<Resource> findByFilters(@Param("skills") List<String> skills, @Param("min") int minLevel, @Param("max") int maxLevel, Pageable pageable);
+
+    Optional<Resource> findByExternalId(String externalId);
 }

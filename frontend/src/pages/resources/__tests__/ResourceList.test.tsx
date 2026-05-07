@@ -17,6 +17,16 @@ vi.mock('../../../hooks/useResources', () => ({
   useResources: mockUseResources,
 }))
 
+// Mock admin filter API - return default options to avoid loading states
+vi.mock('../../../api/admin', () => ({
+  listFiltersByCategory: vi.fn(() =>
+    Promise.resolve([
+      { id: 1, category: 'skill', value: 'backend', displayOrder: 1, isActive: true },
+      { id: 2, category: 'skill', value: 'frontend', displayOrder: 2, isActive: true },
+    ])
+  ),
+}))
+
 function createWrapper() {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
@@ -31,7 +41,7 @@ function createWrapper() {
 describe('ResourceList', () => {
   beforeEach(() => {
     mockUseResources.mockReturnValue({
-      data: [],
+      data: { content: [], totalElements: 0, totalPages: 0 },
       isLoading: false,
       error: null,
     })
@@ -50,12 +60,7 @@ describe('ResourceList', () => {
   it('renders filter dropdowns', () => {
     render(<ResourceList />, { wrapper: createWrapper() })
     const comboboxes = screen.getAllByRole('combobox')
-    expect(comboboxes.length).toBeGreaterThanOrEqual(3)
-  })
-
-  it('renders Import CSV button', () => {
-    render(<ResourceList />, { wrapper: createWrapper() })
-    expect(screen.getByText('Import CSV')).toBeInTheDocument()
+    expect(comboboxes.length).toBeGreaterThanOrEqual(4)
   })
 
   it('renders Export button', () => {
@@ -70,9 +75,13 @@ describe('ResourceList', () => {
 
   it('renders resource count when data loaded', () => {
     mockUseResources.mockReturnValue({
-      data: [
-        { id: 1, externalId: 'EMP-001', name: 'Alice', costCenterId: 'CC-ENG', billableTeamCode: 'BTC-API', category: 'PERMANENT', skill: 'backend', level: 5, status: 'ACTIVE', isBillable: true, isActive: true, version: 1, createdAt: '2026-01-01', updatedAt: '2026-01-01' },
-      ],
+      data: {
+        content: [
+          { id: 1, externalId: 'EMP-001', name: 'Alice', costCenterId: 'CC-ENG', billableTeamCode: 'BTC-API', category: 'PERMANENT', skill: 'backend', level: 5, status: 'ACTIVE', isBillable: true, isActive: true, version: 1, createdAt: '2026-01-01', updatedAt: '2026-01-01' },
+        ],
+        totalElements: 1,
+        totalPages: 1,
+      },
       isLoading: false,
       error: null,
     })

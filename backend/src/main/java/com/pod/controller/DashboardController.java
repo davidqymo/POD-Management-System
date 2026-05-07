@@ -8,6 +8,20 @@ import org.springframework.web.bind.annotation.*;
 import java.util.List;
 import java.util.Map;
 
+/**
+ * DashboardController - REST API for dashboard analytics and reporting.
+ *
+ * ENDPOINTS:
+ * - GET /api/v1/dashboard/summary - High-level metrics (resources, projects, allocations)
+ * - GET /api/v1/dashboard/resources - Resource status breakdown
+ * - GET /api/v1/dashboard/projects - Project status breakdown
+ * - GET /api/v1/dashboard/supply-demand - Supply vs Demand analysis by skill
+ * - GET /api/v1/dashboard/over-budget - Projects exceeding budget
+ * - GET /api/v1/dashboard/variance - Budget variance analysis
+ *
+ * All endpoints return data optimized for dashboard visualizations.
+ * Uses read-only transactions for performance.
+ */
 @RestController
 @RequestMapping("/api/v1/dashboard")
 public class DashboardController {
@@ -66,5 +80,12 @@ public class DashboardController {
     public ResponseEntity<Map<String, Object>> getUtilization() {
         Map<String, Object> utilization = dashboardService.getUtilization();
         return ResponseEntity.ok(utilization);
+    }
+
+    @GetMapping("/budget-trend")
+    public ResponseEntity<List<BudgetTrendDTO>> getBudgetTrend(
+            @RequestParam(defaultValue = "2026") int fiscalYear) {
+        List<BudgetTrendDTO> trend = dashboardService.getBudgetTrend(fiscalYear);
+        return ResponseEntity.ok(trend);
     }
 }

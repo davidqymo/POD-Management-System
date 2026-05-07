@@ -2,7 +2,9 @@ package com.pod.controller;
 
 import com.pod.entity.Resource;
 import com.pod.entity.ResourceStatus;
+import com.pod.exception.ResourceNotFoundException;
 import com.pod.service.ResourceService;
+import jakarta.validation.Valid;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
@@ -18,6 +20,39 @@ import org.springframework.web.bind.annotation.RestController;
 import java.util.HashMap;
 import java.util.Map;
 
+/**
+ * ResourceController - REST API endpoints for Resource operations.
+ *
+ * PROCESS FLOW:
+ * 1. GET /api/v1/resources - List resources with pagination and filtering
+ *    - Query params: search, skill, costCenter, status, functionalManager, l5TeamCode, page, size
+ *    - Returns: Page<Resource> sorted by name
+ *
+ * 2. GET /api/v1/resources/{id} - Get single resource by ID
+ *    - Returns: 404 if not found (ResourceNotFoundException)
+ *
+ * 3. POST /api/v1/resources - Create new resource
+ *    - Body: Resource JSON (validated via @Valid)
+ *    - Returns: Created Resource with generated ID
+ *
+ * 4. PATCH /api/v1/resources/{id}/status - Change resource status
+ *    - Body: { "status": "ON_LEAVE", "reason": "..." }
+ *    - Validates state transition before applying
+ *    - Returns: Updated Resource
+ *
+ * 5. PATCH /api/v1/resources/{id}/deactivate - Soft delete (deactivate)
+ *    - Sets isActive=false
+ *    - Returns: 204 No Content
+ *
+ * 6. POST /api/v1/resources/{id}/update - Partial update resource
+ *    - Body: Map of field names to new values
+ *    - Returns: Updated Resource
+ *
+ * ERROR HANDLING:
+ * - ResourceNotFoundException -> 404 Not Found
+ * - InvalidStatusTransitionException -> 400 Bad Request
+ * - MethodArgumentNotValidException -> 400 Bad Request (validation errors)
+ */
 @RestController
 @RequestMapping("/api/v1/resources")
 public class ResourceController {
@@ -30,7 +65,7 @@ public class ResourceController {
 
     @GetMapping("/{id}")
     public Resource getById(@PathVariable Long id) {
-        return resourceService.findById(id).orElseThrow(() -> new IllegalArgumentException("Resource not found: " + id));
+        return resourceService.findById(id).orElseThrow(() -> new ResourceNotFoundException("Resource not found: " + id));
     }
 
     @GetMapping
@@ -39,20 +74,22 @@ public class ResourceController {
             @RequestParam(required = false) String skill,
             @RequestParam(required = false) String costCenter,
             @RequestParam(required = false) String status,
+            @RequestParam(required = false) String functionalManager,
+            @RequestParam(required = false) String l5TeamCode,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
-        return resourceService.findAllWithFilters(search, skill, costCenter, status, PageRequest.of(page, size, Sort.by("name")));
+        return resourceService.findAllWithFilters(search, skill, costCenter, status, functionalManager, l5TeamCode, PageRequest.of(page, size, Sort.by("name")));
     }
 
     @PostMapping
-    public Resource create(@RequestBody Resource resource) {
+    public Resource create(@Valid @RequestBody Resource resource) {
         return resourceService.create(resource);
     }
 
     @PatchMapping("/{id}/status")
     public Resource changeStatus(
             @PathVariable Long id,
-            @RequestBody Map<String, String> body) {
+            @Valid @RequestBody Map<String, String> body) {
         ResourceStatus status = ResourceStatus.valueOf(body.get("status"));
         String reason = body.get("reason");
         resourceService.changeStatus(id, status, reason);
@@ -65,7 +102,7 @@ public class ResourceController {
     }
 
     @PostMapping("/{id}/update")
-    public Resource update(@PathVariable Long id, @RequestBody Map<String, Object> body) {
+    public Resource update(@PathVariable Long id, @Valid @RequestBody Map<String, Object> body) {
         return resourceService.updateFields(id, body);
     }
 }
