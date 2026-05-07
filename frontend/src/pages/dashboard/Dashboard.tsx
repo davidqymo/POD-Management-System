@@ -1,6 +1,8 @@
+import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { ComposedChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Line, Legend, PieChart, Pie, Cell } from 'recharts'
-import { getDashboardSummary, getSupplyDemandTrend, getVariance, getSupplyBySkill, getAllocationStatus } from '@/api/dashboard'
+import { getDashboardSummary, getSupplyDemandTrend, getVariance, getSupplyBySkill, getBudgetTrend } from '@/api/dashboard'
+import { getResources } from '@/api/resources'
 
 const COLORS = ['#209d9d', '#f59e0b', '#ef4444', '#10b981', '#8b5cf6']
 
@@ -90,6 +92,21 @@ function EmptyState({ title, description, icon }: { title: string; description: 
 }
 
 export default function Dashboard() {
+  const [l5TeamFilter, setL5TeamFilter] = useState<string>('')
+
+  // Fetch unique L5 teams for filter
+  const { data: resourcesData } = useQuery({
+    queryKey: ['resources', 'all'],
+    queryFn: () => getResources({ size: 1000 }),
+  })
+
+  // Extract unique L5 team codes
+  const l5Teams: string[] = Array.from(new Set(
+    (resourcesData?.content || [])
+      .filter((r: any) => r.l5TeamCode)
+      .map((r: any) => r.l5TeamCode)
+  )).sort() as string[]
+
   const { data: summary, isLoading: loadingSummary } = useQuery({
     queryKey: ['dashboard', 'summary'],
     queryFn: getDashboardSummary,
@@ -116,9 +133,9 @@ export default function Dashboard() {
     queryFn: getSupplyBySkill,
   })
 
-  const { data: allocationStatus, isLoading: loadingStatus } = useQuery({
-    queryKey: ['dashboard', 'status'],
-    queryFn: getAllocationStatus,
+  const { data: budgetTrend, isLoading: loadingBudgetTrend } = useQuery({
+    queryKey: ['dashboard', 'budgetTrend', 2026],
+    queryFn: () => getBudgetTrend(2026),
   })
 
   if (loadingSummary) {
@@ -131,10 +148,33 @@ export default function Dashboard() {
   return (
     <div className="p-6 space-y-6">
       {/* Header with subtle decoration */}
-      <div className="relative">
-        <div className="absolute -left-4 top-0 bottom-0 w-1 bg-gradient-to-b from-teal-500 to-teal-300 rounded-full opacity-50" />
-        <h1 className="text-2xl font-bold text-gray-900 tracking-tight">Supply & Demand Dashboard</h1>
-        <p className="text-sm text-gray-500 mt-1.5">Resource allocation overview for fiscal year Dec - Nov</p>
+      <div className="flex items-center justify-between">
+        <div className="relative">
+          <div className="absolute -left-4 top-0 bottom-0 w-1 bg-gradient-to-b from-teal-500 to-teal-300 rounded-full opacity-50" />
+          <span
+            className="text-sm font-medium"
+            style={{ color: '#78716c' }}
+          >
+            Resource allocation overview for fiscal year Dec - Nov
+          </span>
+        </div>
+
+        {/* L5 Team Filter */}
+        {l5Teams.length > 0 && (
+          <div className="flex items-center gap-2">
+            <label className="text-sm font-medium text-gray-600">L5 Team:</label>
+            <select
+              value={l5TeamFilter}
+              onChange={(e) => setL5TeamFilter(e.target.value)}
+              className="rounded-lg border border-gray-200 px-3 py-1.5 text-sm bg-white"
+            >
+              <option value="">All Teams</option>
+              {l5Teams.map((team: string) => (
+                <option key={team} value={team}>{team}</option>
+              ))}
+            </select>
+          </div>
+        )}
       </div>
 
       {/* Summary Cards - Enhanced */}
@@ -191,53 +231,6 @@ export default function Dashboard() {
 
       {/* Charts Row */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {/* Allocation Status */}
-        <div className="bg-white rounded-xl border border-gray-100 p-5">
-          <h3 className="text-sm font-semibold text-gray-700 mb-4">Allocation Status</h3>
-          {loadingStatus ? (
-            <div className="h-48 flex items-center justify-center">
-              <div className="w-6 h-6 border-2 border-gray-200 border-t-teal-500 rounded-full animate-spin" />
-            </div>
-          ) : allocationStatus && allocationStatus.length > 0 ? (
-            <ResponsiveContainer width="100%" height={180}>
-              <PieChart>
-                <Pie
-                  data={allocationStatus}
-                  dataKey="count"
-                  nameKey="status"
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={50}
-                  outerRadius={70}
-                  paddingAngle={3}
-                >
-                  {allocationStatus.map((_, index) => (
-                    <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                  ))}
-                </Pie>
-                <Tooltip
-                  content={({ active, payload }) => {
-                    if (!active || !payload?.length) return null
-                    return (
-                      <div className="bg-white border border-gray-200 rounded-lg shadow-lg px-3 py-2 text-xs">
-                        <span className="font-medium text-gray-900">{payload[0].name}: </span>
-                        <span className="text-gray-600">{payload[0].value}</span>
-                      </div>
-                    )
-                  }}
-                />
-              </PieChart>
-            </ResponsiveContainer>
-          ) : (
-            <EmptyState
-              title="No allocations"
-              description="Allocation status will appear here"
-              icon={<svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" /></svg>}
-            />
-          )}
-        </div>
-
-        {/* Supply by Skill */}
         <div className="bg-white rounded-xl border border-gray-100 p-5">
           <h3 className="text-sm font-semibold text-gray-700 mb-4">Supply by Skill</h3>
           {loadingSkillSupply ? (
@@ -245,35 +238,44 @@ export default function Dashboard() {
               <div className="w-6 h-6 border-2 border-gray-200 border-t-teal-500 rounded-full animate-spin" />
             </div>
           ) : skillSupply && skillSupply.length > 0 ? (
-            <ResponsiveContainer width="100%" height={180}>
-              <PieChart>
-                <Pie
-                  data={skillSupply}
-                  dataKey="count"
-                  nameKey="skill"
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={50}
-                  outerRadius={70}
-                  paddingAngle={3}
-                >
-                  {skillSupply.map((_, index) => (
-                    <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                  ))}
-                </Pie>
-                <Tooltip
-                  content={({ active, payload }) => {
-                    if (!active || !payload?.length) return null
-                    return (
-                      <div className="bg-white border border-gray-200 rounded-lg shadow-lg px-3 py-2 text-xs">
-                        <span className="font-medium text-gray-900">{payload[0].name}: </span>
-                        <span className="text-gray-600">{payload[0].value}</span>
-                      </div>
-                    )
-                  }}
-                />
-              </PieChart>
-            </ResponsiveContainer>
+            (() => {
+              const total = skillSupply.reduce((sum, s) => sum + s.count, 0)
+              return (
+                <ResponsiveContainer width="100%" height={180}>
+                  <PieChart>
+                    <Pie
+                      data={skillSupply}
+                      dataKey="count"
+                      nameKey="skill"
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={50}
+                      outerRadius={70}
+                      paddingAngle={3}
+                      label={({ skill, percent }) => `${skill} (${(percent * 100).toFixed(0)}%)`}
+                      labelLine={false}
+                    >
+                      {skillSupply.map((_, index) => (
+                        <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                      ))}
+                    </Pie>
+                    <Tooltip
+                      content={({ active, payload }) => {
+                        if (!active || !payload?.length) return null
+                        const item = payload[0].payload
+                        const percent = ((item.count / total) * 100).toFixed(1)
+                        return (
+                          <div className="bg-white border border-gray-200 rounded-lg shadow-lg px-3 py-2 text-xs">
+                            <span className="font-medium text-gray-900">{item.skill}: </span>
+                            <span className="text-gray-600">{item.count} ({percent}%)</span>
+                          </div>
+                        )
+                      }}
+                    />
+                  </PieChart>
+                </ResponsiveContainer>
+              )
+            })()
           ) : (
             <EmptyState
               title="No skill data"
@@ -282,6 +284,51 @@ export default function Dashboard() {
             />
           )}
         </div>
+      </div>
+
+      {/* Budget Trend - Burn-down Chart */}
+      <div className="bg-white rounded-xl border border-gray-100 p-5">
+        <h3 className="text-sm font-semibold text-gray-700 mb-4">Budget vs Allocation Trend</h3>
+        {loadingBudgetTrend ? (
+          <div className="h-72 flex items-center justify-center">
+            <div className="w-6 h-6 border-2 border-gray-200 border-t-teal-500 rounded-full animate-spin" />
+          </div>
+        ) : budgetTrend && budgetTrend.length > 0 ? (
+          <ResponsiveContainer width="100%" height={280}>
+            <ComposedChart data={budgetTrend}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+              <XAxis dataKey="month" tick={{ fontSize: 11 }} stroke="#9ca3af" />
+              <YAxis tick={{ fontSize: 11 }} stroke="#9ca3af" tickFormatter={(v) => `$${v}K`} />
+              <Tooltip
+                content={({ active, payload, label }) => {
+                  if (!active || !payload?.length) return null
+                  return (
+                    <div className="bg-white border border-gray-200 rounded-lg shadow-lg px-3 py-2 text-xs">
+                      <p className="font-semibold text-gray-900 mb-1">{label}</p>
+                      {payload.map((entry: any, idx: number) => (
+                        <div key={idx} className="flex items-center gap-2">
+                          <span className="w-2 h-2 rounded-full" style={{ backgroundColor: entry.color }} />
+                          <span className="text-gray-500">{entry.name}:</span>
+                          <span className="font-medium text-gray-900">${entry.value?.toFixed(1)}K</span>
+                        </div>
+                      ))}
+                    </div>
+                  )
+                }}
+              />
+              <Legend />
+              <Line type="monotone" dataKey="totalBudgetK" name="Total Budget" stroke="#3b82f6" strokeWidth={2} dot={false} />
+              <Line type="monotone" dataKey="allocatedK" name="Allocated" stroke="#10b981" strokeWidth={2} dot={{ fill: '#10b981', r: 4 }} />
+              <Line type="monotone" dataKey="remainingK" name="Remaining" stroke="#f59e0b" strokeWidth={2} strokeDasharray="5 5" dot={false} />
+            </ComposedChart>
+          </ResponsiveContainer>
+        ) : (
+          <EmptyState
+            title="No budget data"
+            description="Budget allocation trends will appear here"
+            icon={<svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>}
+          />
+        )}
       </div>
 
       {/* Supply vs Demand Chart */}

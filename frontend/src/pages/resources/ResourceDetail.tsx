@@ -2,14 +2,20 @@ import { useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { getResourceById, getResources, updateResource } from '../../api/resources';
-import { listAllocations, createAllocation, approveAllocation, rejectAllocation, CreateAllocationRequest, ApproveAllocationRequest } from '@/api/allocations';
+import { listAllocations, createAllocation, updateAllocationHours, deleteAllocation, CreateAllocationRequest } from '@/api/allocations';
 import { projectsApi } from '@/api/projects';
+import { ratesApi } from '@/api/rates';
+import { listFiltersByCategory } from '@/api/admin';
 import AllocationList from '@/components/allocation/AllocationList';
 import AllocationModal from '@/components/allocation/AllocationModal';
-import AllocationApprovalPanel from '@/components/allocation/AllocationApprovalPanel';
 import type { Resource } from '@/types';
 
-type TabType = 'details' | 'assignments' | 'rate-history';
+// Default fallback options when API unavailable
+const DEFAULT_COST_CENTER_OPTIONS = ['HT366', 'ENG-CC1', 'ENG-CC2', 'ENG-CC3', 'ENG-CC4', 'FIN-CC1', 'FIN-CC2', 'PM-CC1', 'PM-CC2'];
+const DEFAULT_BILLABLE_TEAM_OPTIONS = ['ITDDEVPEM18', 'BTC-API', 'TC001', 'TC002'];
+const DEFAULT_L5_TEAM_OPTIONS = ['AM-LENDING', 'AM-PAYMENTS', 'AM-CORE'];
+
+type TabType = 'details' | 'assignments';
 
 interface CreateAllocationForm {
   resourceId: number | null;
@@ -23,19 +29,25 @@ export default function ResourceDetail() {
   const { id } = useParams<{ id: string }>();
   const resourceId = Number(id);
   const queryClient = useQueryClient();
-  const [activeTab, setActiveTab] = useState<TabType>('assignments');
+  const [activeTab, setActiveTab] = useState<TabType>('details');
   const [modalOpen, setModalOpen] = useState(false);
-  const [currentUserId] = useState(1);
+  const [expanded, setExpanded] = useState({
+    assignments: true,
+    rates: false,
+  });
   const [editMode, setEditMode] = useState(false);
+  const [displayMode, setDisplayMode] = useState<'hcm' | 'usd'>('hcm');
   const [editForm, setEditForm] = useState({
     name: '',
     externalId: '',
     costCenterId: '',
     billableTeamCode: '',
     category: '',
+    skills: '',
     skill: '',
     level: 1,
-    isBillable: true,
+    functionalManager: '',
+    l5TeamCode: '',
   });
 
   const { data: resource, isLoading: loadingResource } = useQuery({
@@ -56,6 +68,33 @@ export default function ResourceDetail() {
   });
   const projects = projectsData?.data?.content || [];
 
+  // Fetch filter options from admin API
+  const { data: costCenterFilters = [] } = useQuery({
+    queryKey: ['admin', 'filters', 'cost_center'],
+    queryFn: () => listFiltersByCategory('cost_center'),
+  });
+
+  const { data: billableTeamFilters = [] } = useQuery({
+    queryKey: ['admin', 'filters', 'billable_team'],
+    queryFn: () => listFiltersByCategory('billable_team'),
+  });
+
+  const { data: l5TeamFilters = [] } = useQuery({
+    queryKey: ['admin', 'filters', 'l5_team'],
+    queryFn: () => listFiltersByCategory('l5_team'),
+  });
+
+  // Derive options - use API data or fallbacks
+  const COST_CENTER_OPTIONS = costCenterFilters.length > 0
+    ? costCenterFilters.map(f => f.value)
+    : DEFAULT_COST_CENTER_OPTIONS;
+  const BILLABLE_TEAM_OPTIONS = billableTeamFilters.length > 0
+    ? billableTeamFilters.map(f => f.value)
+    : DEFAULT_BILLABLE_TEAM_OPTIONS;
+  const L5_TEAM_OPTIONS = l5TeamFilters.length > 0
+    ? l5TeamFilters.map(f => f.value)
+    : DEFAULT_L5_TEAM_OPTIONS;
+
   const { data: resourcesData } = useQuery({
     queryKey: ['resources', 'all'],
     queryFn: () => getResources({ page: 0, size: 200 }),
@@ -63,16 +102,33 @@ export default function ResourceDetail() {
   const resources = (resourcesData as any)?.content || [];
 
   const createMutation = useMutation({
-    mutationFn: async (form: CreateAllocationForm) => {
-      if (!form.resourceId || !form.projectId) {
+    mutationFn: async (form: CreateAllocationForm | { resourceId: number; projectId: number; hcm: number; hours: number }) => {
+      // Handle both old format (with weekStartDate) and new format (with hcm)
+      const resourceId = form.resourceId;
+      const projectId = form.projectId;
+      let hcm: number;
+      let hours: number;
+
+      if ('weekStartDate' in form && form.weekStartDate) {
+        // Old format
+        hcm = Number.parseInt(form.weekStartDate.replace(/-/g, '').slice(0, 6));
+        hours = Number.parseFloat(form.hours);
+      } else {
+        // New format for inline create
+        hcm = (form as any).hcm;
+        hours = (form as any).hours;
+      }
+
+      if (!resourceId || !projectId) {
         throw new Error('Resource and project are required');
       }
+
       const request: CreateAllocationRequest = {
-        resourceId: form.resourceId,
-        projectId: form.projectId,
-        weekStart: form.weekStartDate,
-        hours: parseFloat(form.hours),
-        notes: form.notes || undefined,
+        resourceId,
+        projectId,
+        hcm,
+        hours,
+        notes: 'notes' in form ? form.notes || undefined : undefined,
       };
       return createAllocation(request);
     },
@@ -82,15 +138,19 @@ export default function ResourceDetail() {
     },
   });
 
-  const approveMutation = useMutation({
-    mutationFn: (request: ApproveAllocationRequest) => approveAllocation(request),
+  const updateAllocMutation = useMutation({
+    mutationFn: async ({ id, hours }: { id: number; hours: number }) => {
+      await updateAllocationHours(id, hours);
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['allocations'] });
     },
   });
 
-  const rejectMutation = useMutation({
-    mutationFn: (request: ApproveAllocationRequest) => rejectAllocation(request),
+  const deleteAllocMutation = useMutation({
+    mutationFn: async (id: number) => {
+      await deleteAllocation(id);
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['allocations'] });
     },
@@ -105,13 +165,22 @@ export default function ResourceDetail() {
     },
   });
 
-  const handleApprove = async (request: ApproveAllocationRequest) => {
-    await approveMutation.mutateAsync(request);
+  const toggleSection = (section: 'assignments' | 'rates') => {
+    setExpanded(prev => ({ ...prev, [section]: !prev[section] }));
   };
 
-  const handleReject = async (request: ApproveAllocationRequest) => {
-    await rejectMutation.mutateAsync(request);
-  };
+  // Fetch rates for this resource's cost center + team
+  const { data: rates = [] } = useQuery({
+    queryKey: ['rates', resource?.costCenterId, resource?.billableTeamCode],
+    queryFn: async () => {
+      if (!resource?.costCenterId || !resource?.billableTeamCode) return [];
+      const allRates = await ratesApi.list();
+      return allRates.filter(
+        r => r.costCenterId === resource.costCenterId && r.billableTeamCode === resource.billableTeamCode
+      );
+    },
+    enabled: !!resource?.costCenterId && !!resource?.billableTeamCode,
+  });
 
   if (loadingResource) {
     return (
@@ -131,8 +200,7 @@ export default function ResourceDetail() {
 
   const tabs = [
     { id: 'details' as TabType, label: 'Details' },
-    { id: 'assignments' as TabType, label: 'Assignments' },
-    { id: 'rate-history' as TabType, label: 'Rate History' },
+    { id: 'assignments' as TabType, label: 'Assignments & Rates' },
   ];
 
   return (
@@ -186,8 +254,10 @@ export default function ResourceDetail() {
                     billableTeamCode: resource.billableTeamCode || '',
                     category: resource.category || '',
                     skill: resource.skill || '',
+                    skills: resource.skill || '',
                     level: resource.level || 1,
-                    isBillable: resource.isBillable ?? true,
+                    functionalManager: (resource as any).functionalManager || '',
+                    l5TeamCode: (resource as any).l5TeamCode || '',
                   });
                   setEditMode(true);
                 }}
@@ -240,21 +310,51 @@ export default function ResourceDetail() {
                 </div>
                 <div>
                   <label className="block text-xs text-gray-500 mb-1">Cost Center</label>
-                  <input
-                    type="text"
+                  <select
                     value={editForm.costCenterId}
                     onChange={(e) => setEditForm({ ...editForm, costCenterId: e.target.value })}
+                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg"
+                  >
+                    <option value="">Select Cost Center</option>
+                    {COST_CENTER_OPTIONS.map(cc => (
+                      <option key={cc} value={cc}>{cc}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">Billable Team</label>
+                  <select
+                    value={editForm.billableTeamCode}
+                    onChange={(e) => setEditForm({ ...editForm, billableTeamCode: e.target.value })}
+                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg"
+                  >
+                    <option value="">Select Billable Team</option>
+                    {BILLABLE_TEAM_OPTIONS.map(team => (
+                      <option key={team} value={team}>{team}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">Functional Manager</label>
+                  <input
+                    type="text"
+                    value={editForm.functionalManager}
+                    onChange={(e) => setEditForm({ ...editForm, functionalManager: e.target.value })}
                     className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs text-gray-500 mb-1">Billable Team</label>
-                  <input
-                    type="text"
-                    value={editForm.billableTeamCode}
-                    onChange={(e) => setEditForm({ ...editForm, billableTeamCode: e.target.value })}
+                  <label className="block text-xs text-gray-500 mb-1">L5 Team Code</label>
+                  <select
+                    value={editForm.l5TeamCode}
+                    onChange={(e) => setEditForm({ ...editForm, l5TeamCode: e.target.value })}
                     className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg"
-                  />
+                  >
+                    <option value="">Select L5 Team</option>
+                    {L5_TEAM_OPTIONS.map(team => (
+                      <option key={team} value={team}>{team}</option>
+                    ))}
+                  </select>
                 </div>
               </div>
 
@@ -270,11 +370,12 @@ export default function ResourceDetail() {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs text-gray-500 mb-1">Skill</label>
+                  <label className="block text-xs text-gray-500 mb-1">Skills (comma-separated)</label>
                   <input
                     type="text"
                     value={editForm.skill}
-                    onChange={(e) => setEditForm({ ...editForm, skill: e.target.value })}
+                    onChange={(e) => setEditForm({ ...editForm, skill: e.target.value, skills: e.target.value })}
+                    placeholder="Java, Python, React"
                     className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg"
                   />
                 </div>
@@ -286,16 +387,6 @@ export default function ResourceDetail() {
                     onChange={(e) => setEditForm({ ...editForm, level: parseInt(e.target.value) || 1 })}
                     className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg"
                   />
-                </div>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    id="isBillable"
-                    checked={editForm.isBillable}
-                    onChange={(e) => setEditForm({ ...editForm, isBillable: e.target.checked })}
-                    className="w-4 h-4 rounded"
-                  />
-                  <label htmlFor="isBillable" className="text-sm text-gray-700">Billable</label>
                 </div>
               </div>
             </div>
@@ -319,6 +410,14 @@ export default function ResourceDetail() {
               <div className="flex justify-between">
                 <dt className="text-gray-500">Billable Team:</dt>
                 <dd className="font-medium">{resource.billableTeamCode}</dd>
+              </div>
+              <div className="flex justify-between">
+                <dt className="text-gray-500">L5 Team Code:</dt>
+                <dd className="font-medium">{(resource as any).l5TeamCode || '-'}</dd>
+              </div>
+              <div className="flex justify-between">
+                <dt className="text-gray-500">Functional Manager:</dt>
+                <dd className="font-medium">{resource.functionalManager || '-'}</dd>
               </div>
             </dl>
           </div>
@@ -350,10 +449,6 @@ export default function ResourceDetail() {
                   </span>
                 </dd>
               </div>
-              <div className="flex justify-between">
-                <dt className="text-gray-500">Billable:</dt>
-                <dd className="font-medium">{resource.isBillable ? 'Yes' : 'No'}</dd>
-              </div>
             </dl>
           </div>
         </div>
@@ -362,62 +457,130 @@ export default function ResourceDetail() {
       )}
 
       {activeTab === 'assignments' && (
-        <div className="space-y-6">
-          {/* Header */}
-          <div className="flex items-center justify-between">
-            <div>
-              <h2 className="text-lg font-bold text-gray-900">Project Assignments</h2>
-              <p className="text-sm text-gray-500">
-                {allocations.length} allocation{allocations.length !== 1 ? 's' : ''} found
-              </p>
-            </div>
+        <div className="space-y-4">
+          {/* Section 1: Project Assignments (Accordion) */}
+          <div className="border rounded-lg overflow-hidden">
             <button
-              onClick={() => setModalOpen(true)}
-              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg font-medium text-white"
-              style={{
-                background: 'linear-gradient(135deg, #209d9d 0%, #0D4F4F 100%)',
-                boxShadow: '0 2px 8px rgba(32, 158, 157, 0.25)'
-              }}
+              className="w-full flex justify-between items-center p-4 bg-gray-50 hover:bg-gray-100"
+              onClick={() => toggleSection('assignments')}
             >
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
-              </svg>
-              Assign to Project
+              <div>
+                <h2 className="text-lg font-bold text-gray-900">Project Assignments</h2>
+                <p className="text-sm text-gray-500">
+                  {allocations.length} allocation{allocations.length !== 1 ? 's' : ''} found
+                </p>
+              </div>
+              <span>{expanded.assignments ? '▲' : '▼'}</span>
             </button>
+            {expanded.assignments && (
+              <div className="p-4 border-t">
+                <button
+                  onClick={() => setModalOpen(true)}
+                  className="mb-4 inline-flex items-center gap-2 px-4 py-2.5 rounded-lg font-medium text-white"
+                  style={{
+                    background: 'linear-gradient(135deg, #209d9d 0%, #0D4F4F 100%)',
+                    boxShadow: '0 2px 8px rgba(32, 158, 157, 0.25)'
+                  }}
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+                  </svg>
+                  Assign to Project
+                </button>
+                <AllocationList
+                  allocations={allocations}
+                  loading={loadingAllocations}
+                  resourceId={Number(resourceId)}
+                  displayMode={displayMode}
+                  onDisplayModeChange={setDisplayMode}
+                  ratePerHcm={rates[0]?.monthlyRateK || 0}
+                  onUpdateAllocation={async (id, hours) => {
+                    await updateAllocMutation.mutateAsync({ id, hours });
+                  }}
+                  onDeleteAllocation={async (id) => {
+                    await deleteAllocMutation.mutateAsync(id);
+                  }}
+                  onCreateAllocation={async (resourceId, projectName, hcm, hours) => {
+                    // Find project by name
+                    const project = projects.find(p => p.name === projectName);
+                    if (!project) return;
+                    const form = {
+                      resourceId,
+                      projectId: project.id,
+                      hcm,
+                      hours,
+                    };
+                    await createMutation.mutateAsync(form as any);
+                  }}
+                />
+                <AllocationModal
+                  open={modalOpen}
+                  onClose={() => setModalOpen(false)}
+                  onSubmit={async (form: any) => {
+                    await createMutation.mutateAsync(form);
+                  }}
+                  defaultResourceId={resourceId}
+                  resources={resources}
+                  projects={projects}
+                  disabledResourceSelection={true}
+                />
+              </div>
+            )}
           </div>
 
-          {/* Approval Panel */}
-          <AllocationApprovalPanel
-            allocations={allocations}
-            loading={loadingAllocations}
-            onApprove={handleApprove}
-            onReject={handleReject}
-            currentUserId={currentUserId}
-          />
-
-          {/* Allocation List */}
-          <AllocationList
-            allocations={allocations}
-            loading={loadingAllocations}
-          />
-
-          {/* Create Modal */}
-          <AllocationModal
-            open={modalOpen}
-            onClose={() => setModalOpen(false)}
-            onSubmit={async (form) => {
-              await createMutation.mutateAsync(form);
-            }}
-            defaultResourceId={resourceId}
-            resources={resources}
-            projects={projects}
-          />
-        </div>
-      )}
-
-      {activeTab === 'rate-history' && (
-        <div className="p-8 text-center text-gray-500">
-          Rate history not yet available
+          {/* Section 2: Rate History (Accordion) */}
+          <div className="border rounded-lg overflow-hidden">
+            <button
+              className="w-full flex justify-between items-center p-4 bg-gray-50 hover:bg-gray-100"
+              onClick={() => toggleSection('rates')}
+            >
+              <div>
+                <h2 className="text-lg font-bold text-gray-900">Rate History</h2>
+                <p className="text-sm text-gray-500">
+                  {rates.length} rate{rates.length !== 1 ? 's' : ''} | Cost Center: {resource?.costCenterId} | Team: {resource?.billableTeamCode}
+                </p>
+              </div>
+              <span>{expanded.rates ? '▲' : '▼'}</span>
+            </button>
+            {expanded.rates && (
+              <div className="p-4 border-t">
+                {rates.length === 0 ? (
+                  <div className="p-8 text-center text-gray-500 rounded-lg border border-gray-200">
+                    No rate history found for this resource
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto rounded-lg border border-gray-200">
+                    <table className="min-w-full">
+                      <thead className="bg-gray-50">
+                        <tr>
+                          <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Effective From</th>
+                          <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Effective To</th>
+                          <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Monthly Rate (K USD)</th>
+                          <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100">
+                        {rates.map((rate: any) => (
+                          <tr key={rate.id} className="hover:bg-gray-50">
+                            <td className="px-4 py-2 text-sm text-gray-900">{rate.effectiveFrom}</td>
+                            <td className="px-4 py-2 text-sm text-gray-600">{rate.effectiveTo || '—'}</td>
+                            <td className="px-4 py-2 text-sm font-medium text-gray-900 text-right">${rate.monthlyRateK}K</td>
+                            <td className="px-4 py-2">
+                              <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${
+                                !rate.effectiveTo ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
+                              }`}>
+                                {!rate.effectiveTo ? 'Active' : 'Historical'}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         </div>
       )}
     </div>

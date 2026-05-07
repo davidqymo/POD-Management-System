@@ -100,6 +100,13 @@ export interface Utilization {
   availableCapacity: number
 }
 
+export interface BudgetTrend {
+  month: string
+  totalBudgetK: number
+  allocatedK: number
+  remainingK: number
+}
+
 export interface Rate {
   id: number
   costCenterId: string
